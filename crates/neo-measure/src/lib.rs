@@ -28,7 +28,7 @@ pub mod generator;
 pub mod spectrum;
 //pub mod stereo;
 //pub mod tone;
-//pub mod transfer;
+pub mod transfer;
 pub mod util;
 //pub mod weighting;
 //pub mod wow_flutter;
