@@ -3,7 +3,7 @@ name = "neofilter"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "NeoFilter 24-band parametric EQ plugin (CLAP + VST3)"
+description = "NeoFilter 32-band parametric EQ plugin (CLAP + VST3)"
 
 [lib]
 name = "neofilter"

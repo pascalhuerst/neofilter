@@ -1,7 +1,7 @@
 //! Plugin parameters.
 //!
 //! Parameter ids are frozen (see CLAUDE.md). nih-plug's nested arrays generate
-//! `{field}_{n}` (n = 1..=24) in group `Band {n}`:
+//! `{field}_{n}` (n = 1..=32) in group `Band {n}`:
 //! `used_n`, `on_n`, `shape_n`, `freq_n`, `gain_n`, `q_n`, `slope_n`, `place_n`.
 //! Globals: `bypass`, `out_gain` (dB), `gain_scale` (percent, 0..200).
 

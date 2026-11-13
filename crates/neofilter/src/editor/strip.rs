@@ -133,10 +133,10 @@ mod tests {
         let mut u = [false; NUM_BANDS];
         u[2] = true;
         u[7] = true;
-        u[23] = true;
+        u[NUM_BANDS - 1] = true;
         assert_eq!(step_band(&u, 2, true), Some(7));
-        assert_eq!(step_band(&u, 23, true), Some(2));
-        assert_eq!(step_band(&u, 2, false), Some(23));
+        assert_eq!(step_band(&u, NUM_BANDS - 1, true), Some(2));
+        assert_eq!(step_band(&u, 2, false), Some(NUM_BANDS - 1));
         assert_eq!(step_band(&u, 7, false), Some(2));
         assert_eq!(step_band(&u, 5, true), Some(7));
         assert_eq!(step_band(&[false; NUM_BANDS], 0, true), None);

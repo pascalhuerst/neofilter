@@ -3,6 +3,7 @@ mod common;
 use common::*;
 use neofilter_dsp::band::{BandDesign, BandFilter};
 use neofilter_dsp::response::{band_response_db, total_response_db};
+use neofilter_dsp::types::NUM_BANDS;
 use neofilter_dsp::{BandParams, EqEngine, Placement, Shape, Slope};
 use proptest::prelude::*;
 
@@ -123,7 +124,7 @@ fn engine_survives_extreme_random_parameter_changes() {
     let mut l = vec![0.0; 256];
     let mut r = vec![0.0; 256];
     for round in 0..400 {
-        for i in 0..24 {
+        for i in 0..NUM_BANDS {
             let u = |ns: &mut Noise| 0.5 * (ns.next() + 1.0);
             let p = BandParams {
                 used: u(&mut ns) > 0.2,

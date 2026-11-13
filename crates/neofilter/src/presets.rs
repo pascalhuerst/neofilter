@@ -99,35 +99,79 @@ const DEFAULT: FactoryPreset = FactoryPreset {
     out_gain_db: 0.0,
 };
 
+/// Friend EQ A: bands 1..=15 (the rest of the 32 slots are unused).
+const A_BANDS: [Option<PresetBand>; 15] = [
+    bell(41.1, 2.58, 1.00, Slope::Db12),
+    b(Shape::HighShelf, 722.9, -1.32, 1.00, Slope::Db12),
+    bell(98.0, -1.83, 2.73, Slope::Db24),
+    bell(35.9, 2.54, 2.75, Slope::Db24),
+    bell(9729.0, 2.46, 3.24, Slope::Db48),
+    bell(233.0, -2.50, 1.00, Slope::Db12),
+    b(Shape::LowCut, 28.6, 0.0, 1.00, Slope::Db12),
+    bell(177.7, -5.38, 0.68, Slope::Db12),
+    bell(2093.0, -2.99, 1.25, Slope::Db48),
+    bell(5074.0, 4.90, 10.91, Slope::Db24),
+    disabled(b(Shape::HighCut, 4657.0, 0.0, 1.00, Slope::Db6)),
+    bell(392.7, -2.87, 2.97, Slope::Db12),
+    bell(2035.0, 2.78, 5.00, Slope::Db48),
+    bell(11787.0, 2.45, 4.59, Slope::Db48),
+    bell(15484.0, 15.69, 7.23, Slope::Db24),
+];
+
+/// Friend EQ B: bands 1..=12 (bands 1, 3, 7 are unused in the table).
+const B_BANDS: [Option<PresetBand>; 12] = [
+    N,
+    b(Shape::HighCut, 13607.0, 0.0, 1.00, Slope::Db48),
+    N,
+    bell(4317.0, 10.58, 1.05, Slope::Db24),
+    bell(85.7, 7.62, 1.77, Slope::Db24),
+    bell(701.3, -7.36, 2.01, Slope::Db12),
+    N,
+    bell(15959.0, 8.51, 14.14, Slope::Db48),
+    bell(13195.0, -4.62, 10.00, Slope::Db36),
+    bell(6282.0, -3.54, 10.00, Slope::Db36),
+    bell(10011.0, 2.64, 5.95, Slope::Db12),
+    bell(165.7, 2.06, 2.97, Slope::Db48),
+];
+
+/// 0-based indices into `B_BANDS` of the bands carried into the combined
+/// preset (B2, B4, B5, B6, B8, B9, B10, B11, B12), in table order.
+const AB_B_SOURCE: [usize; 9] = [1, 3, 4, 5, 7, 8, 9, 10, 11];
+
+/// Band table padded with unused slots up to `NUM_BANDS`.
+const fn pad<const L: usize>(src: &[Option<PresetBand>; L]) -> [Option<PresetBand>; NUM_BANDS] {
+    let mut out = [N; NUM_BANDS];
+    let mut i = 0;
+    while i < L {
+        out[i] = src[i];
+        i += 1;
+    }
+    out
+}
+
+/// Friend EQ A followed by Friend EQ B in one instance (the two EQs are linear
+/// and run in series, so one instance with all their bands is equivalent).
+///
+/// Band mapping (1-based):
+/// * bands 1..=15 = A's bands 1..=15 (band 11 is used but disabled)
+/// * bands 16..=24 = B's used bands in table order:
+///   B2 -> 16, B4 -> 17, B5 -> 18, B6 -> 19, B8 -> 20, B9 -> 21, B10 -> 22,
+///   B11 -> 23, B12 -> 24
+/// * bands 25..=32 are unused spares
+const fn combine_ab() -> [Option<PresetBand>; NUM_BANDS] {
+    let mut out = pad(&A_BANDS);
+    let mut k = 0;
+    while k < AB_B_SOURCE.len() {
+        out[A_BANDS.len() + k] = B_BANDS[AB_B_SOURCE[k]];
+        k += 1;
+    }
+    out
+}
+
 const FRIEND_EQ_A: FactoryPreset = FactoryPreset {
     id: "friend-eq-a",
     name: "Friend EQ A",
-    bands: [
-        bell(41.1, 2.58, 1.00, Slope::Db12),
-        b(Shape::HighShelf, 722.9, -1.32, 1.00, Slope::Db12),
-        bell(98.0, -1.83, 2.73, Slope::Db24),
-        bell(35.9, 2.54, 2.75, Slope::Db24),
-        bell(9729.0, 2.46, 3.24, Slope::Db48),
-        bell(233.0, -2.50, 1.00, Slope::Db12),
-        b(Shape::LowCut, 28.6, 0.0, 1.00, Slope::Db12),
-        bell(177.7, -5.38, 0.68, Slope::Db12),
-        bell(2093.0, -2.99, 1.25, Slope::Db48),
-        bell(5074.0, 4.90, 10.91, Slope::Db24),
-        disabled(b(Shape::HighCut, 4657.0, 0.0, 1.00, Slope::Db6)),
-        bell(392.7, -2.87, 2.97, Slope::Db12),
-        bell(2035.0, 2.78, 5.00, Slope::Db48),
-        bell(11787.0, 2.45, 4.59, Slope::Db48),
-        bell(15484.0, 15.69, 7.23, Slope::Db24),
-        N,
-        N,
-        N,
-        N,
-        N,
-        N,
-        N,
-        N,
-        N,
-    ],
+    bands: pad(&A_BANDS),
     gain_scale: 100.0,
     out_gain_db: 0.0,
 };
@@ -135,39 +179,22 @@ const FRIEND_EQ_A: FactoryPreset = FactoryPreset {
 const FRIEND_EQ_B: FactoryPreset = FactoryPreset {
     id: "friend-eq-b",
     name: "Friend EQ B",
-    bands: [
-        N,
-        b(Shape::HighCut, 13607.0, 0.0, 1.00, Slope::Db48),
-        N,
-        bell(4317.0, 10.58, 1.05, Slope::Db24),
-        bell(85.7, 7.62, 1.77, Slope::Db24),
-        bell(701.3, -7.36, 2.01, Slope::Db12),
-        N,
-        bell(15959.0, 8.51, 14.14, Slope::Db48),
-        bell(13195.0, -4.62, 10.00, Slope::Db36),
-        bell(6282.0, -3.54, 10.00, Slope::Db36),
-        bell(10011.0, 2.64, 5.95, Slope::Db12),
-        bell(165.7, 2.06, 2.97, Slope::Db48),
-        N,
-        N,
-        N,
-        N,
-        N,
-        N,
-        N,
-        N,
-        N,
-        N,
-        N,
-        N,
-    ],
+    bands: pad(&B_BANDS),
     gain_scale: 100.0,
     out_gain_db: 0.0,
 };
 
-static FACTORY_PRESETS: [FactoryPreset; 3] = [DEFAULT, FRIEND_EQ_A, FRIEND_EQ_B];
+const FRIEND_EQ_AB: FactoryPreset = FactoryPreset {
+    id: "friend-eq-ab",
+    name: "Friend EQ A+B (series)",
+    bands: combine_ab(),
+    gain_scale: 100.0,
+    out_gain_db: 0.0,
+};
 
-/// All factory presets: Default, Friend EQ A, Friend EQ B.
+static FACTORY_PRESETS: [FactoryPreset; 4] = [DEFAULT, FRIEND_EQ_A, FRIEND_EQ_B, FRIEND_EQ_AB];
+
+/// All factory presets: Default, Friend EQ A, Friend EQ B, Friend EQ A+B.
 pub fn factory_presets() -> &'static [FactoryPreset] {
     &FACTORY_PRESETS
 }
@@ -366,7 +393,7 @@ impl PresetFile {
         }
     }
 
-    /// Band parameters for all 24 slots; bands absent from the file are default (unused).
+    /// Band parameters for all 32 slots; bands absent from the file are default (unused).
     /// Values are clamped to their ranges; unknown shape/placement strings fall back
     /// to defaults (`from_json` rejects them beforehand).
     pub fn band_params(&self) -> [BandParams; NUM_BANDS] {
@@ -394,7 +421,7 @@ impl PresetFile {
     }
 
     /// Parse a preset. Missing optional fields get defaults, out-of-range numbers are
-    /// clamped; unknown shape/placement ids and band numbers outside 1..=24 are errors.
+    /// clamped; unknown shape/placement ids and band numbers outside 1..=32 are errors.
     pub fn from_json(json: &str) -> Result<Self, String> {
         let mut f: PresetFile = serde_json::from_str(json).map_err(|e| e.to_string())?;
         f.gain_scale = clamp_finite(

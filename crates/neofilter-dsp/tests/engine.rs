@@ -1,5 +1,6 @@
 mod common;
 use common::*;
+use neofilter_dsp::types::NUM_BANDS;
 use neofilter_dsp::{BandParams, EqEngine, Placement, Shape, Slope};
 
 const FS: f64 = 48000.0;
@@ -72,7 +73,7 @@ fn unused_and_disabled_bands_do_nothing() {
 #[test]
 fn out_of_range_index_and_garbage_params_are_safe() {
     let mut e = EqEngine::new(FS);
-    e.set_band(24, &bell(1000.0, 6.0, 1.0));
+    e.set_band(NUM_BANDS, &bell(1000.0, 6.0, 1.0));
     e.set_band(usize::MAX, &bell(1000.0, 6.0, 1.0));
     let mut p = bell(f64::NAN, f64::INFINITY, f64::NAN);
     e.set_band(0, &p);

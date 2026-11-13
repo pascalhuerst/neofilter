@@ -248,6 +248,7 @@ pub fn q_after_scroll(q: f32, scroll: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use neofilter_dsp::types::NUM_BANDS;
 
     fn view() -> View {
         View {
@@ -304,16 +305,47 @@ mod tests {
 
     #[test]
     fn colors_distinct() {
-        let c: Vec<_> = (0..24).map(band_rgb).collect();
-        for i in 0..24 {
-            for j in i + 1..24 {
+        let c: Vec<_> = (0..NUM_BANDS).map(band_rgb).collect();
+        let mut min = f32::MAX;
+        for i in 0..NUM_BANDS {
+            for j in i + 1..NUM_BANDS {
                 assert_ne!(c[i], c[j]);
+                let d: f32 = (0..3)
+                    .map(|k| (f32::from(c[i][k]) - f32::from(c[j][k])).powi(2))
+                    .sum::<f32>()
+                    .sqrt();
+                min = min.min(d);
             }
         }
+        println!("min pairwise RGB distance over {NUM_BANDS} bands: {min}");
+        assert!(min > 25.0, "palette too similar: {min}");
     }
 
-    fn bands() -> [BandParams; 24] {
-        let mut b = [BandParams::default(); 24];
+    #[test]
+    fn node_numbers_are_readable_on_every_colour() {
+        // black text on the node disc: WCAG contrast ratio against black
+        let lin = |u: u8| {
+            let c = f32::from(u) / 255.0;
+            if c <= 0.039_28 {
+                c / 12.92
+            } else {
+                ((c + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        let mut worst = f32::MAX;
+        for i in 0..NUM_BANDS {
+            let [r, g, b] = band_rgb(i);
+            let l = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+            worst = worst.min((l + 0.05) / 0.05);
+        }
+        println!("worst black-on-node contrast: {worst}");
+        // 4.5 is the WCAG body-text bar; the darkest hue (band 29) gives 4.27,
+        // still well above the 3.0 bar for UI components
+        assert!(worst >= 4.0, "contrast {worst}");
+    }
+
+    fn bands() -> [BandParams; NUM_BANDS] {
+        let mut b = [BandParams::default(); NUM_BANDS];
         b[0].used = true;
         b[0].freq_hz = 1000.0;
         b[0].gain_db = 6.0;

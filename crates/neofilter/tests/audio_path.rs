@@ -238,7 +238,7 @@ fn restored_settings_are_in_effect_from_the_first_block() {
     // A host restores the state, then initialises and processes: there must be
     // no glide from defaults (bell gain, output gain, band fade-in).
     let mut bands = FLAT;
-    bands[23] = BandParams {
+    bands[NUM_BANDS - 1] = BandParams {
         used: true,
         gain_db: 12.0,
         ..BandParams::default()

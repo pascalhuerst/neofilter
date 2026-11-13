@@ -37,6 +37,36 @@ const B: [Row; 9] = [
     (12, Bell, 165.7, 2.06, 2.97, 48, true),
 ];
 
+/// Friend EQ A+B: bands 1..=15 are A's, bands 16..=24 are B's bands 2, 4, 5, 6,
+/// 8, 9, 10, 11, 12 in table order. Written out literally (not derived from
+/// `A` / `B`) so the mapping itself is pinned down.
+const AB: [Row; 24] = [
+    (1, Bell, 41.1, 2.58, 1.00, 12, true),
+    (2, HighShelf, 722.9, -1.32, 1.00, 12, true),
+    (3, Bell, 98.0, -1.83, 2.73, 24, true),
+    (4, Bell, 35.9, 2.54, 2.75, 24, true),
+    (5, Bell, 9729.0, 2.46, 3.24, 48, true),
+    (6, Bell, 233.0, -2.50, 1.00, 12, true),
+    (7, LowCut, 28.6, 0.0, 1.00, 12, true),
+    (8, Bell, 177.7, -5.38, 0.68, 12, true),
+    (9, Bell, 2093.0, -2.99, 1.25, 48, true),
+    (10, Bell, 5074.0, 4.90, 10.91, 24, true),
+    (11, HighCut, 4657.0, 0.0, 1.00, 6, false),
+    (12, Bell, 392.7, -2.87, 2.97, 12, true),
+    (13, Bell, 2035.0, 2.78, 5.00, 48, true),
+    (14, Bell, 11787.0, 2.45, 4.59, 48, true),
+    (15, Bell, 15484.0, 15.69, 7.23, 24, true),
+    (16, HighCut, 13607.0, 0.0, 1.00, 48, true),
+    (17, Bell, 4317.0, 10.58, 1.05, 24, true),
+    (18, Bell, 85.7, 7.62, 1.77, 24, true),
+    (19, Bell, 701.3, -7.36, 2.01, 12, true),
+    (20, Bell, 15959.0, 8.51, 14.14, 48, true),
+    (21, Bell, 13195.0, -4.62, 10.00, 36, true),
+    (22, Bell, 6282.0, -3.54, 10.00, 36, true),
+    (23, Bell, 10011.0, 2.64, 5.95, 12, true),
+    (24, Bell, 165.7, 2.06, 2.97, 48, true),
+];
+
 fn check(id: &str, rows: &[Row]) {
     let p = factory_presets().iter().find(|p| p.id == id).unwrap();
     let bp = p.band_params();
@@ -67,13 +97,41 @@ fn check(id: &str, rows: &[Row]) {
 #[test]
 fn presets_match_plan_tables() {
     let ps = factory_presets();
-    assert_eq!(ps.len(), 3);
+    assert_eq!(ps.len(), 4);
     assert_eq!((ps[0].id, ps[0].name), ("default", "Default"));
     assert_eq!((ps[1].id, ps[1].name), ("friend-eq-a", "Friend EQ A"));
     assert_eq!((ps[2].id, ps[2].name), ("friend-eq-b", "Friend EQ B"));
+    assert_eq!(
+        (ps[3].id, ps[3].name),
+        ("friend-eq-ab", "Friend EQ A+B (series)")
+    );
     check("default", &[]);
+    check("friend-eq-ab", &AB);
     check("friend-eq-a", &A);
     check("friend-eq-b", &B);
+}
+
+#[test]
+fn combined_preset_layout() {
+    let bp = factory_presets()[3].band_params();
+    assert_eq!(bp.iter().filter(|b| b.used).count(), 24);
+    assert_eq!(bp.iter().filter(|b| b.used && b.enabled).count(), 23);
+    assert!(bp[10].used && !bp[10].enabled, "A band 11 stays disabled");
+    for (i, b) in bp.iter().enumerate().skip(24) {
+        assert_eq!(
+            *b,
+            neofilter_dsp::BandParams::default(),
+            "spare band {}",
+            i + 1
+        );
+    }
+    // the original presets keep their band positions
+    let a = factory_presets()[1].band_params();
+    let b = factory_presets()[2].band_params();
+    assert_eq!(a[..15], bp[..15]);
+    for (k, src) in [1usize, 3, 4, 5, 7, 8, 9, 10, 11].into_iter().enumerate() {
+        assert_eq!(bp[15 + k], b[src], "B band {} -> band {}", src + 1, 16 + k);
+    }
 }
 
 #[test]
@@ -125,7 +183,7 @@ fn json_tolerant_and_clamping() {
     let f = PresetFile::from_json(
         r#"{"gain_scale": 500, "out_gain_db": -99,
             "bands":[{"band": 3, "freq_hz": 1e9, "gain_db": 99, "q": 0, "slope": 50},
-                     {"band": 24, "shape": "notch", "placement": "mid"}]}"#,
+                     {"band": 32, "shape": "notch", "placement": "mid"}]}"#,
     )
     .unwrap();
     assert_eq!(f.version, 1);
@@ -137,9 +195,9 @@ fn json_tolerant_and_clamping() {
     assert_eq!(bp[2].gain_db, 30.0);
     assert_eq!(bp[2].q, 0.025);
     assert_eq!(bp[2].slope, Slope::Db48);
-    assert_eq!(bp[23].shape, Shape::Notch);
-    assert_eq!(bp[23].placement, Placement::Mid);
-    assert_eq!(bp[23].freq_hz, 1000.0);
+    assert_eq!(bp[31].shape, Shape::Notch);
+    assert_eq!(bp[31].placement, Placement::Mid);
+    assert_eq!(bp[31].freq_hz, 1000.0);
     assert_eq!(bp.iter().filter(|b| b.used).count(), 2);
     assert_eq!(bp.len(), NUM_BANDS);
 
@@ -149,7 +207,7 @@ fn json_tolerant_and_clamping() {
     assert!(e.bands.is_empty());
 
     assert!(PresetFile::from_json("not json").is_err());
-    assert!(PresetFile::from_json(r#"{"bands":[{"band":25}]}"#).is_err());
+    assert!(PresetFile::from_json(r#"{"bands":[{"band":33}]}"#).is_err());
     assert!(PresetFile::from_json(r#"{"bands":[{"band":0}]}"#).is_err());
     assert!(PresetFile::from_json(r#"{"bands":[{"band":1,"shape":"zzz"}]}"#).is_err());
     assert!(PresetFile::from_json(r#"{"bands":[{"band":1,"placement":"up"}]}"#).is_err());

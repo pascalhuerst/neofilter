@@ -332,6 +332,7 @@ pub fn show(ui: &mut Ui, state: &mut EditorState, setter: &ParamSetter, rect: Re
 
     // Nodes.
     let font = FontId::proportional(10.0);
+    let small_font = FontId::proportional(8.5);
     for nd in &nodes {
         let b = &snap[nd.band];
         let mut c = color(nd.band);
@@ -365,7 +366,12 @@ pub fn show(ui: &mut Ui, state: &mut EditorState, setter: &ParamSetter, rect: Re
             center,
             Align2::CENTER_CENTER,
             format!("{}", nd.band + 1),
-            font.clone(),
+            // two-digit numbers need the smaller font to fit the disc
+            if nd.band + 1 >= 10 {
+                small_font.clone()
+            } else {
+                font.clone()
+            },
             Color32::BLACK,
         );
     }
@@ -410,7 +416,7 @@ fn add_band(
     p: Pos2,
 ) {
     let Some(slot) = scale::first_unused(snap) else {
-        state.status = "All 24 bands are in use".into();
+        state.status = "All 32 bands are in use".into();
         return;
     };
     let shape = scale::shape_for_position((p.x - view.x0) / view.width);

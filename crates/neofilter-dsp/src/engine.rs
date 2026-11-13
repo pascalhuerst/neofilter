@@ -1,4 +1,4 @@
-//! The 24-band EQ engine: the API the plugin codes against.
+//! The 32-band EQ engine: the API the plugin codes against.
 //!
 //! Design notes
 //! * Bands run in series. Every band owns two [`Voice`]s: the current one and
@@ -11,7 +11,7 @@
 //! * Redesigns are rationed: at most `TICK_SECTION_BUDGET` biquad sections are
 //!   redesigned per 32-sample update (round robin, a postponed band catches up
 //!   with a proportionally larger smoothing step), so loading a preset that moves
-//!   all 24 bands cannot cause a CPU spike.
+//!   all 32 bands cannot cause a CPU spike.
 //! * The first `set_band` after `new` / `reset` / `set_sample_rate` snaps the
 //!   band to its parameters without smoothing or fades.
 //! * Nothing here allocates; all storage is fixed size.
@@ -287,7 +287,7 @@ impl Band {
     }
 }
 
-/// 24-band equaliser.
+/// 32-band equaliser.
 #[derive(Debug, Clone)]
 pub struct EqEngine {
     sample_rate: f64,

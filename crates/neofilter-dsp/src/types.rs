@@ -1,7 +1,7 @@
 //! Shared band parameter types and limits.
 
 /// Number of EQ bands.
-pub const NUM_BANDS: usize = 24;
+pub const NUM_BANDS: usize = 32;
 /// Maximum number of biquad sections per band.
 pub const MAX_SECTIONS: usize = 8;
 /// Minimum band frequency in Hz.

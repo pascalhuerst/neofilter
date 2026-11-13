@@ -1,6 +1,6 @@
 # NeoFilter
 
-24-band parametric EQ plugin (CLAP + VST3) in Rust, built on nih-plug.
+32-band parametric EQ plugin (CLAP + VST3) in Rust, built on nih-plug.
 Design and phase plan: see `PLAN.md` — read it before changing DSP or params.
 
 ## Hard rules
@@ -11,7 +11,7 @@ Design and phase plan: see `PLAN.md` — read it before changing DSP or params.
   the repo root and `orig/` are the user's and stay untracked.
 - Do not push. Do not rewrite history.
 - No FabFilter names in code identifiers, UI strings or plugin metadata.
-- Parameter ids are frozen (`freq_{n}`, `gain_{n}`, `q_{n}`, `used_{n}`, `on_{n}`, `shape_{n}`, `slope_{n}`, `place_{n}`, n = 1..24; `out_gain`, `gain_scale`, `bypass`); never rename or reorder.
+- Parameter ids are frozen (`freq_{n}`, `gain_{n}`, `q_{n}`, `used_{n}`, `on_{n}`, `shape_{n}`, `slope_{n}`, `place_{n}`, n = 1..32; `out_gain`, `gain_scale`, `bypass`); never rename or reorder.
 
 ## Commands
 

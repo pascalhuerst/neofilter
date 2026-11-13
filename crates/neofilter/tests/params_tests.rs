@@ -26,14 +26,41 @@ fn param_ids_unique_and_snapshot() {
     sorted.dedup();
     assert_eq!(sorted.len(), ids.len(), "duplicate ids");
     assert_eq!(ids, expected_ids());
-    assert_eq!(ids.len(), 3 + 8 * 24);
+    assert_eq!(ids.len(), 3 + 8 * 32);
+    // Bands 1..=24 are the original 24-band layout, byte for byte and in the
+    // same order (state saved before the 24 -> 32 change must keep loading);
+    // bands 25..=32 are appended after them.
+    let mut legacy: Vec<String> = ["bypass", "out_gain", "gain_scale"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    for n in 1..=24 {
+        for f in ["used", "on", "shape", "freq", "gain", "q", "slope", "place"] {
+            legacy.push(format!("{f}_{n}"));
+        }
+    }
+    assert_eq!(ids[..legacy.len()], legacy[..], "bands 1..=24 ids changed");
+    assert_eq!(ids[legacy.len()], "used_25");
+    assert_eq!(ids.last().unwrap(), "place_32");
+    // spot checks of the host-visible hashed ids of the original bands
+    // (nih-plug: h = h*31 + byte over the id, top bit cleared)
+    let hash = |id: &str| {
+        id.bytes()
+            .fold(0u32, |h, c| h.wrapping_mul(31).wrapping_add(u32::from(c)))
+            & !(1 << 31)
+    };
+    assert_eq!(hash("freq_1"), 0x3484_642a, "freq_1 hash");
+    let mut hashes: Vec<u32> = ids.iter().map(|i| hash(i)).collect();
+    hashes.sort_unstable();
+    hashes.dedup();
+    assert_eq!(hashes.len(), ids.len(), "host id hash collision");
     // literal spot checks so the scheme itself cannot drift
     assert!(ids.contains(&"freq_1".to_string()));
-    assert!(ids.contains(&"place_24".to_string()));
+    assert!(ids.contains(&"place_32".to_string()));
     // groups
     let g = |id: &str| map.iter().find(|(i, _, _)| i == id).unwrap().2.clone();
     assert_eq!(g("freq_1"), "Band 1");
-    assert_eq!(g("q_24"), "Band 24");
+    assert_eq!(g("q_32"), "Band 32");
     assert_eq!(g("bypass"), "");
 }
 

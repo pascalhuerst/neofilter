@@ -9,7 +9,7 @@
 //!   `SAMPLE_ACCURATE_AUTOMATION` is set; the engine smooths and runs its
 //!   updates on a fixed 32-sample grid, so output does not depend on the
 //!   block partition). `EqEngine::set_band` is a compare-and-store for
-//!   unchanged parameters, so pushing all 24 bands is cheap.
+//!   unchanged parameters, so pushing all 32 bands is cheap.
 //! * Output gain is ramped linearly in dB over 20 ms.
 //! * Bypass crossfades dry and wet linearly over 10 ms. The EQ keeps running
 //!   while bypassed (its state stays valid, so un-bypassing needs no reset) and

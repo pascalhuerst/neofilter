@@ -1,7 +1,7 @@
 //! Analytic magnitude responses of the digital filters (for the GUI and tests).
 //!
 //! Everything here is allocation-free and cheap enough to call from the GUI
-//! thread every frame (24 bands x ~500 points): per point one `sin` and a
+//! thread every frame (32 bands x ~500 points): per point one `sin` and a
 //! handful of multiplies per section, evaluated in the cancellation-free phi
 //! basis (see [`crate::biquad::PhiForm`]).
 

@@ -156,3 +156,56 @@ fn unusual_sample_rates_and_extreme_settings_are_stable() {
         }
     }
 }
+
+/// Worst case for the redesign rationing: every one of the NUM_BANDS bands is
+/// moved at once and every band is a 96 dB/oct shape (up to 16 sections each),
+/// i.e. several times the 16-section budget per 32-sample interval. The engine
+/// must still land on the fresh design promptly (not just "eventually").
+#[test]
+fn full_band_count_at_96_db_converges_within_one_second() {
+    let mut noise = Noise(0xdead_beef);
+    for fs in [44100.0, 96000.0] {
+        let mut mk = |gain: f64| -> [BandParams; NUM_BANDS] {
+            std::array::from_fn(|i| {
+                let u = 0.5 * (noise.next() + 1.0);
+                BandParams {
+                    used: true,
+                    enabled: true,
+                    shape: [Shape::Bell, Shape::LowCut, Shape::HighCut, Shape::HighShelf][i % 4],
+                    freq_hz: 40.0 * 400.0f64.powf(u),
+                    gain_db: gain,
+                    q: 0.7 + 2.0 * u,
+                    slope: Slope::Db96,
+                    placement: Placement::Stereo,
+                }
+            })
+        };
+        let first = mk(3.0);
+        let second = mk(-4.0);
+        let mut e = EqEngine::new(fs);
+        for (i, b) in first.iter().enumerate() {
+            e.set_band(i, b);
+        }
+        let mut x = vec![0.0; 4800];
+        e.process_mono(&mut x);
+        // preset load while audio runs
+        for (i, b) in second.iter().enumerate() {
+            e.set_band(i, b);
+        }
+        let mut x = vec![0.0; fs as usize];
+        e.process_mono(&mut x);
+        let got = impulse_response(&mut e, 4096);
+        let mut fresh = EqEngine::new(fs);
+        for (i, b) in second.iter().enumerate() {
+            fresh.set_band(i, b);
+        }
+        let want = impulse_response(&mut fresh, 4096);
+        let err = got
+            .iter()
+            .zip(&want)
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0, f64::max);
+        println!("fs {fs}: {NUM_BANDS} x 96 dB/oct, 1 s after the load: error {err:e}");
+        assert!(err < 1e-9, "fs {fs}: not converged after 1 s: {err}");
+    }
+}

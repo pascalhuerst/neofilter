@@ -4,6 +4,7 @@
 mod common;
 use common::*;
 use neofilter_dsp::response::{analog_band_response_db, band_response_db, total_response_db};
+use neofilter_dsp::types::NUM_BANDS;
 use neofilter_dsp::{BandParams, EqEngine, Placement, Shape, Slope};
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
@@ -57,7 +58,7 @@ fn engine_and_response_do_not_allocate() {
     let mut mono = vec![0.2; 4096];
     let freqs = grid(10.0, 30000.0, 500);
     let mut out = vec![0.0; 500];
-    let bands: Vec<BandParams> = (0..24)
+    let bands: Vec<BandParams> = (0..NUM_BANDS)
         .map(|i| {
             band(
                 Shape::ALL[i % 9],

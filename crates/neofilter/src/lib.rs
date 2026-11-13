@@ -120,7 +120,7 @@ impl Plugin for NeoFilter {
 
 impl ClapPlugin for NeoFilter {
     const CLAP_ID: &'static str = "org.neofilter.neofilter";
-    const CLAP_DESCRIPTION: Option<&'static str> = Some("24-band parametric equalizer");
+    const CLAP_DESCRIPTION: Option<&'static str> = Some("32-band parametric equalizer");
     const CLAP_MANUAL_URL: Option<&'static str> = None;
     const CLAP_SUPPORT_URL: Option<&'static str> = None;
     const CLAP_FEATURES: &'static [ClapFeature] = &[
