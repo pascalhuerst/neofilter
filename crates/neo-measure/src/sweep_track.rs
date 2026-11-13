@@ -826,6 +826,7 @@ mod tests {
 
     fn check(tr: &SweepTracker, lo: f64, sweep_lo: f64, hi: f64, tol: f64) -> usize {
         let mut covered = 0;
+        let mut worst = 0.0f64;
         for i in 0..tr.cell_count() {
             let fc = tr.grid_hz(i);
             let cell = tr.cell(0, i);
@@ -839,11 +840,15 @@ mod tests {
                     c.level_db,
                     want
                 );
+                worst = worst.max((c.level_db - want).abs());
                 covered += 1;
             } else if fc < sweep_lo / 1.1 || fc > hi * 1.1 {
                 assert!(cell.is_none(), "cell {i} ({fc:.0} Hz) wrongly covered");
             }
         }
+        println!(
+            "sweep {sweep_lo:.0}..{hi:.0} Hz: {covered} covered cells, worst error {worst:.3} dB"
+        );
         covered
     }
 
@@ -956,6 +961,10 @@ mod tests {
             norm_offset_at(&pts, Characteristic::ConstantVelocity, true, false, 1000.0).unwrap();
         let dev = deviation_points(&pts, Characteristic::ConstantVelocity, true, false, off);
         let s = deviation_stats(&dev, 0.0, 1e9).unwrap();
+        println!(
+            "de-emphasis sweep after nominal conversion: {:+.4} .. {:+.4} dB",
+            s.min_db, s.max_db
+        );
         assert!(s.max_db.abs() < 0.05 && s.min_db.abs() < 0.05, "{s:?}");
         // without the nominal conversion the RIAA curve is plainly visible
         let raw = deviation_stats(&pts, 0.0, 1e9).unwrap();
