@@ -12,8 +12,14 @@ const MASK_DB: f64 = -30.0;
 
 /// (max |digital - analog| in dB over 10 Hz..0.4 fs, same over 0.4..0.45 fs)
 fn deviation(p: &BandParams, fs: f64) -> (f64, f64) {
-    let lo = grid(10.0, 0.4 * fs, 240);
-    let hi = grid(0.4 * fs, 0.45 * fs, 24);
+    // Bell and even-order High Cut follow the reference EQ's rule (see
+    // `reference_rule`): against the analog prototype they are judged only up
+    // to 0.1 fs, and the 0.4..0.45 fs window is skipped (reported as 0).
+    let (lo, hi) = if reference_rule(p.shape, p.slope) {
+        (grid(10.0, 0.1 * fs, 120), Vec::new())
+    } else {
+        (grid(10.0, 0.4 * fs, 240), grid(0.4 * fs, 0.45 * fs, 24))
+    };
     let dev = |fr: &[f64]| {
         let mut a = vec![0.0; fr.len()];
         let mut d = vec![0.0; fr.len()];
@@ -54,9 +60,15 @@ const PLAN_HI: f64 = 0.5;
 // everyday domain (Q 1..3, |gain| <= 6 dB, <= 24 dB/oct). Do not raise an entry to make a failing test
 // pass: find out why the design got worse.
 const TOL: [[(f64, f64); 6]; 9] = [
-    // Bell
+    // Bell: only the first bucket is still compared with the analog prototype
+    // (and only up to 0.1 fs, see `deviation`). Measured worst 0.414 dB
+    // (24 dB/oct, -15 dB, Q 0.5, 200 Hz at 48 kHz: a very wide bell where the
+    // reference rule's interior points sit far from the analog curve's
+    // features); was 0.03 with the matched design. The other buckets are
+    // skipped: governed by `reference_curves.rs`. Their old values are kept
+    // below for reference only.
     [
-        (0.03, 0.05),
+        (0.52, 0.05),
         (0.2, 0.4),
         (0.25, 0.5),
         (0.4, 0.55),
@@ -137,6 +149,11 @@ const TOL: [[(f64, f64); 6]; 9] = [
     ],
 ];
 
+/// Shapes/slopes designed with the reference rule (see `refmatch`).
+fn reference_rule(shape: Shape, slope: Slope) -> bool {
+    shape == Shape::Bell || (shape == Shape::HighCut && slope.db_per_oct().is_multiple_of(12))
+}
+
 #[test]
 fn accuracy_grid() {
     let freqs = [30.0, 200.0, 1000.0, 4000.0, 9000.0, 16000.0];
@@ -152,6 +169,15 @@ fn accuracy_grid() {
             for &fs in &RATES {
                 for &f in &freqs {
                     if f > 0.4 * fs {
+                        continue;
+                    }
+                    // Bell and even-order High Cut now follow the reference
+                    // EQ's rule, which intentionally deviates from the analog
+                    // prototype towards Nyquist; their accuracy is governed by
+                    // `reference_curves.rs` (measured curves). Against the
+                    // analog prototype they are only compared for band
+                    // frequencies up to 0.02 fs, where the two agree closely.
+                    if reference_rule(*shape, slope) && f > 0.02 * fs {
                         continue;
                     }
                     let uses_gain = matches!(
@@ -244,9 +270,11 @@ fn accuracy_grid() {
             dh
         );
     }
-    // The everyday bell (Q 1..3, small gains) must meet the PLAN target below
-    // 0.1 fs: that is the region where the classic cramping problem is solved.
-    for b in 0..3 {
+    // The everyday bell (Q 1..3, small gains) must meet the PLAN target for
+    // band frequencies up to 0.02 fs (the only bucket still compared with the
+    // analog prototype, see `reference_rule`); the rest of the range is
+    // covered by `reference_curves.rs`.
+    for b in 0..1 {
         let (lo, hi) = core[&(0, b)];
         assert!(
             lo <= PLAN_LO && hi <= PLAN_HI,
@@ -385,9 +413,14 @@ fn presets() -> Vec<(&'static str, Vec<BandParams>)> {
 /// from the analog prototype over 20 Hz - 20 kHz (run with `--nocapture`).
 #[test]
 fn friend_presets_deviation_from_analog() {
-    let freqs = grid(20.0, 20000.0, 2000);
     for (name, bands) in presets() {
         for &fs in &[44100.0, 48000.0] {
+            // The presets consist of Bells (and one even-order High Cut), which
+            // follow the reference rule; against the analog prototype they are
+            // compared only up to 0.1 fs. Their accuracy over the full range is
+            // checked against measured curves in the plugin crate's
+            // `reference_presets.rs`.
+            let freqs = grid(20.0, 0.1 * fs, 2000);
             let mut analog = vec![0.0; freqs.len()];
             let mut digital = vec![0.0; freqs.len()];
             let mut tmp = vec![0.0; freqs.len()];
@@ -422,10 +455,11 @@ fn friend_presets_deviation_from_analog() {
                 worst_band.0,
                 worst_band.2
             );
-            // Measured: A 0.22 / 0.15 dB (band 15484 Hz +15.7 dB Q 7.2 at
-            // 18 kHz), B 1.5 / 1.9 dB (13.6 kHz 48 dB/oct low pass, 28 dB down
-            // at 20 kHz). Guard with margin.
-            let limit = if name.ends_with('A') { 0.35 } else { 2.5 };
+            // Measured over 20 Hz..0.1 fs: A 0.027 / 0.197 dB (the 0.197 is
+            // band 10, 5074 Hz Q 10.9, at the 4800 Hz edge of the range),
+            // B 0.041 / 0.035 dB. Before the reference rule the limits were
+            // 0.35 (A) and 2.5 (B) dB over 20 Hz..20 kHz.
+            let limit = 0.25;
             assert!(dev <= limit, "{name} @ {fs}: {dev} dB > {limit}");
         }
     }

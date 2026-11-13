@@ -2,8 +2,10 @@
 
 use crate::analog::{design_frequency, effective_gain_db, shape_uses_gain, AnalogBand};
 use crate::biquad::{BiquadCoeffs, BiquadState};
-use crate::matched::match_band;
-use crate::types::{BandParams, MAX_SECTIONS};
+use crate::conventions::cut_shelf_order;
+use crate::matched::match_section;
+use crate::refmatch;
+use crate::types::{BandParams, Shape, MAX_Q, MAX_SECTIONS, MIN_Q};
 
 /// Gains below this magnitude (dB) are treated as exactly flat.
 pub const FLAT_GAIN_DB: f64 = 1e-9;
@@ -38,13 +40,33 @@ impl BandDesign {
             return Self::identity();
         }
         let analog = AnalogBand::from_params(params, gain_scale, sample_rate);
-        Self::from_analog(&analog, sample_rate)
+        let q = if params.q.is_finite() { params.q } else { 1.0 }.clamp(MIN_Q, MAX_Q);
+        let mut d = Self::identity();
+        d.len = analog.len();
+        for (o, s) in d.coeffs.iter_mut().zip(analog.sections()) {
+            // Bell (all slopes) and even-order High Cut follow the reference
+            // rule (see `refmatch`); everything else, and any section the rule
+            // cannot handle, uses the matched design.
+            let r = match params.shape {
+                Shape::Bell => refmatch::design_bell_section(s, q, sample_rate),
+                Shape::HighCut if cut_shelf_order(params.slope).is_multiple_of(2) => {
+                    refmatch::design_highcut_section(s, sample_rate)
+                }
+                _ => None,
+            };
+            *o = r.unwrap_or_else(|| match_section(s, sample_rate));
+        }
+        d
     }
 
-    /// Matched digital design of an existing analog prototype.
+    /// Matched digital design of an existing analog prototype (always the
+    /// analog-matched design, never the reference rule).
     pub fn from_analog(analog: &AnalogBand, sample_rate: f64) -> Self {
         let mut d = Self::identity();
-        d.len = match_band(analog, sample_rate, &mut d.coeffs);
+        d.len = analog.len();
+        for (o, s) in d.coeffs.iter_mut().zip(analog.sections()) {
+            *o = match_section(s, sample_rate);
+        }
         d
     }
 

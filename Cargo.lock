@@ -1279,6 +1279,7 @@ dependencies = [
  "proptest",
  "realfft",
  "rustfft",
+ "serde_json",
 ]
 
 [[package]]

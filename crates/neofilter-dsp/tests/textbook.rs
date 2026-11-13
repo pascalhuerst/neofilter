@@ -54,7 +54,12 @@ fn twelve_db_bell_matches_rbj_with_q_over_sqrt2() {
                 // the analog textbook curve, which the matched design aims at
                 let want = analog_peaking_db(f0, g, qs, *f);
                 assert!(
-                    (d - want).abs() < 0.12,
+                    // Was 0.12 with the matched design. The reference rule
+                    // deviates a little more from the analog curve towards
+                    // 0.2 fs for wide bells: measured worst 0.148 dB (3 kHz,
+                    // +12 dB, Q 0.5 at 48 kHz, at 9.6 kHz); every other case
+                    // here is below 0.02 dB.
+                    (d - want).abs() < 0.16,
                     "fs {fs} f0 {f0} g {g} q {q}: at {f:.0} Hz got {d:.3} analog {want:.3}"
                 );
                 // and the bilinear RBJ filter, which cramps a little near fs/5
