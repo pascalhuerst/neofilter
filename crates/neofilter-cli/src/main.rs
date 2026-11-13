@@ -1,13 +1,242 @@
-//! NeoFilter command line tool (response export, IR comparison). Placeholder.
+//! NeoFilter command line tool: preset listing, response export, offline
+//! rendering and impulse-response comparison (calibration).
 
-use clap::Parser;
+mod compare;
+mod model;
+mod wavio;
+
+use clap::{Parser, Subcommand};
+use model::{log_space, PresetSel};
+use neofilter::audio::{AudioParams, AudioPath};
+use neofilter::presets::factory_presets;
+use std::fmt::Write as _;
+use std::path::PathBuf;
+use std::process::ExitCode;
 
 /// NeoFilter command line tool.
+///
+/// The model includes the preset's output gain, as the plugin does.
 #[derive(Parser)]
 #[command(version, about)]
-struct Cli {}
+struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
 
-fn main() {
-    let _cli = Cli::parse();
-    println!("neofilter-cli: not implemented yet");
+#[derive(Subcommand)]
+enum Command {
+    /// List the factory presets.
+    List,
+    /// Print or export a preset's magnitude response (20 Hz - 20 kHz).
+    Curve {
+        #[command(flatten)]
+        preset: PresetSel,
+        #[arg(long, default_value_t = 48000.0)]
+        sample_rate: f64,
+        #[arg(long, default_value_t = 512)]
+        points: usize,
+        /// Use the analog prototype instead of the digital filters.
+        #[arg(long)]
+        analog: bool,
+        /// Write CSV to this file instead of printing.
+        #[arg(long, value_name = "FILE")]
+        csv: Option<PathBuf>,
+    },
+    /// Process a WAV file through a preset (output: 32-bit float WAV).
+    Render {
+        #[command(flatten)]
+        preset: PresetSel,
+        #[arg(long, value_name = "WAV")]
+        input: PathBuf,
+        #[arg(long, value_name = "WAV")]
+        output: PathBuf,
+    },
+    /// Write a preset's impulse response (mono, 32-bit float WAV).
+    Impulse {
+        #[command(flatten)]
+        preset: PresetSel,
+        #[arg(long, default_value_t = 48000)]
+        sample_rate: u32,
+        /// Length in samples.
+        #[arg(long, default_value_t = 131072)]
+        length: usize,
+        #[arg(long, value_name = "WAV")]
+        output: PathBuf,
+    },
+    /// Compare a measured impulse response with the model's digital response.
+    Compare {
+        #[command(flatten)]
+        preset: PresetSel,
+        /// Measured impulse response (mono, or the left channel is used).
+        #[arg(long, value_name = "WAV")]
+        ir: PathBuf,
+    },
+}
+
+fn check_rate(sr: f64) -> Result<(), String> {
+    if sr.is_finite() && (8000.0..=768_000.0).contains(&sr) {
+        Ok(())
+    } else {
+        Err(format!("sample rate {sr} out of range 8000..768000"))
+    }
+}
+
+/// Run a preset through the plugin's audio path.
+fn run_path(model: &model::Model, sample_rate: f64, channels: &mut [Vec<f32>]) {
+    const BLOCK: usize = 4096;
+    let mut path = AudioPath::new(sample_rate, BLOCK);
+    let p = AudioParams {
+        bands: &model.bands,
+        gain_scale: model.gain_scale,
+        out_gain_db: model.out_gain_db,
+        bypass: false,
+    };
+    match channels {
+        [m] => {
+            for chunk in m.chunks_mut(BLOCK) {
+                path.process_mono(chunk, &p);
+            }
+        }
+        [l, r] => {
+            for (cl, cr) in l.chunks_mut(BLOCK).zip(r.chunks_mut(BLOCK)) {
+                path.process_stereo(cl, cr, &p);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn run(cli: Cli) -> Result<String, String> {
+    let mut out = String::new();
+    match cli.command {
+        Command::List => {
+            for p in factory_presets() {
+                let n = p.bands.iter().filter(|b| b.is_some()).count();
+                let _ = writeln!(out, "{:<14} {} ({n} bands)", p.id, p.name);
+            }
+        }
+        Command::Curve {
+            preset,
+            sample_rate,
+            points,
+            analog,
+            csv,
+        } => {
+            check_rate(sample_rate)?;
+            if !(2..=1_000_000).contains(&points) {
+                return Err("--points must be between 2 and 1000000".into());
+            }
+            let model = preset.resolve()?;
+            let hi = compare::F_HI.min(0.49 * sample_rate);
+            let freqs = log_space(compare::F_LO, hi, points);
+            let db = model.response_db(sample_rate, &freqs, analog);
+            let mut text = String::from("freq_hz,db\n");
+            for (f, d) in freqs.iter().zip(&db) {
+                let _ = writeln!(text, "{f:.3},{d:.4}");
+            }
+            match csv {
+                Some(path) => {
+                    std::fs::write(&path, text)
+                        .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+                    let _ = writeln!(out, "wrote {points} points to {}", path.display());
+                }
+                None => out = text,
+            }
+        }
+        Command::Render {
+            preset,
+            input,
+            output,
+        } => {
+            let model = preset.resolve()?;
+            let mut audio = wavio::read(&input)?;
+            check_rate(f64::from(audio.sample_rate))?;
+            run_path(&model, f64::from(audio.sample_rate), &mut audio.channels);
+            wavio::write(&output, &audio)?;
+            let _ = writeln!(
+                out,
+                "rendered {} samples x {} ch through '{}' to {}",
+                audio.channels[0].len(),
+                audio.channels.len(),
+                model.name,
+                output.display()
+            );
+        }
+        Command::Impulse {
+            preset,
+            sample_rate,
+            length,
+            output,
+        } => {
+            check_rate(f64::from(sample_rate))?;
+            if !(16..=50_000_000).contains(&length) {
+                return Err("--length must be between 16 and 50000000".into());
+            }
+            let model = preset.resolve()?;
+            let mut ch = vec![vec![0.0f32; length]];
+            ch[0][0] = 1.0;
+            run_path(&model, f64::from(sample_rate), &mut ch);
+            let audio = wavio::Audio {
+                sample_rate,
+                channels: ch,
+            };
+            wavio::write(&output, &audio)?;
+            let _ = writeln!(
+                out,
+                "wrote {length} samples at {sample_rate} Hz to {}",
+                output.display()
+            );
+        }
+        Command::Compare { preset, ir } => {
+            let model = preset.resolve()?;
+            let audio = wavio::read(&ir)?;
+            let sr = f64::from(audio.sample_rate);
+            check_rate(sr)?;
+            let r = compare::compare(&audio.channels[0], sr, &model)?;
+            let _ = writeln!(
+                out,
+                "preset '{}', IR {} samples at {} Hz, {} bins in {}-{} Hz",
+                model.name,
+                audio.channels[0].len(),
+                audio.sample_rate,
+                r.bins,
+                compare::F_LO,
+                compare::F_HI.min(0.49 * sr)
+            );
+            let _ = writeln!(
+                out,
+                "max deviation: {:.4} dB at {:.1} Hz",
+                r.max_abs_db, r.worst_freq
+            );
+            let _ = writeln!(out, "rms deviation: {:.4} dB", r.rms_db);
+            let _ = writeln!(out, "worst regions (third-octave):");
+            let _ = writeln!(
+                out,
+                "  {:>10} {:>10} {:>10} {:>9} {:>9}",
+                "from Hz", "to Hz", "worst Hz", "max dB", "mean dB"
+            );
+            for g in &r.regions {
+                let _ = writeln!(
+                    out,
+                    "  {:>10.1} {:>10.1} {:>10.1} {:>9.4} {:>+9.4}",
+                    g.lo, g.hi, g.worst_freq, g.max_abs_db, g.mean_db
+                );
+            }
+        }
+    }
+    Ok(out)
+}
+
+fn main() -> ExitCode {
+    let cli = Cli::parse();
+    match run(cli) {
+        Ok(text) => {
+            print!("{text}");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("error: {e}");
+            ExitCode::from(1)
+        }
+    }
 }

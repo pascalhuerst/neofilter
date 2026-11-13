@@ -13,3 +13,8 @@ path = "src/main.rs"
 neofilter-dsp = { path = "../neofilter-dsp" }
 clap = { version = "4", features = ["derive"] }
 hound = "3"
+neofilter = { path = "../neofilter" }
+realfft = "3"
+
+[dev-dependencies]
+hound = "3"
