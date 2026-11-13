@@ -6,6 +6,19 @@ use crate::types::{Shape, Slope};
 /// Displayed Q 1.0 corresponds to textbook Q 1/sqrt(2).
 pub const Q_DISPLAY_TO_STD: f64 = std::f64::consts::FRAC_1_SQRT_2;
 
+/// Flat tilt definition: `gain_db` (after gain scale) is the total level
+/// difference in dB across this many octaves, i.e. the tilt is
+/// `gain_db / FLAT_TILT_OCTAVES_PER_GAIN` dB per octave. Positive gain lifts
+/// the highs and lowers the lows, pivoting (0 dB) at the band frequency.
+/// 10 octaves is roughly 20 Hz to 20 kHz, so +-30 dB is +-3 dB/oct and the
+/// end-to-end level difference across the audible band is about `gain_db`.
+pub const FLAT_TILT_OCTAVES_PER_GAIN: f64 = 10.0;
+
+/// Highest design frequency as a fraction of the sample rate. Band
+/// frequencies above this are clamped (the analog prototype is designed at the
+/// clamped frequency, so ground truth and digital filter agree).
+pub const MAX_DESIGN_FREQ_RATIO: f64 = 0.49;
+
 /// Order N of a cut, shelf or tilt filter: slope / 6.
 pub fn cut_shelf_order(slope: Slope) -> usize {
     (slope.db_per_oct() / 6) as usize
