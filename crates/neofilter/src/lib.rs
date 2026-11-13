@@ -15,12 +15,20 @@ use std::sync::Arc;
 
 pub struct NeoFilter {
     params: Arc<NeoFilterParams>,
+    /// Audio-side analyzer tap; the `process()` author feeds it (see `analyzer.rs`).
+    #[allow(dead_code)]
+    analyzer_in: analyzer::AnalyzerInput,
+    editor_handles: editor::EditorHandles,
 }
 
 impl Default for NeoFilter {
     fn default() -> Self {
+        let params = Arc::new(NeoFilterParams::default());
+        let (analyzer_in, analyzer_out) = analyzer::analyzer(params.editor_state.clone());
         Self {
-            params: Arc::new(NeoFilterParams::default()),
+            params,
+            analyzer_in,
+            editor_handles: editor::EditorHandles::new(analyzer_out),
         }
     }
 }
@@ -55,7 +63,7 @@ impl Plugin for NeoFilter {
     }
 
     fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
-        editor::create(self.params.clone())
+        editor::create(self.params.clone(), self.editor_handles.clone())
     }
 
     fn process(
