@@ -1,9 +1,10 @@
-//! NeoFilter plugin entry point. Pass-through for now; owned later by the Integration agent.
+//! NeoFilter plugin entry point. The audio path lives in [`audio::AudioPath`].
 
 // Lint fired by nih-plug's vst3 export macro (upstream vst3_com), not our code.
 #![allow(semicolon_in_expressions_from_non_local_macros)]
 
 pub mod analyzer;
+pub mod audio;
 pub mod editor;
 pub mod params;
 pub mod presets;
@@ -15,9 +16,9 @@ use std::sync::Arc;
 
 pub struct NeoFilter {
     params: Arc<NeoFilterParams>,
-    /// Audio-side analyzer tap; the `process()` author feeds it (see `analyzer.rs`).
-    #[allow(dead_code)]
+    /// Audio-side analyzer tap (see `analyzer.rs`).
     analyzer_in: analyzer::AnalyzerInput,
+    audio: audio::AudioPath,
     editor_handles: editor::EditorHandles,
 }
 
@@ -28,6 +29,7 @@ impl Default for NeoFilter {
         Self {
             params,
             analyzer_in,
+            audio: audio::AudioPath::default(),
             editor_handles: editor::EditorHandles::new(analyzer_out),
         }
     }
@@ -66,12 +68,52 @@ impl Plugin for NeoFilter {
         editor::create(self.params.clone(), self.editor_handles.clone())
     }
 
+    fn initialize(
+        &mut self,
+        _audio_io_layout: &AudioIOLayout,
+        buffer_config: &BufferConfig,
+        context: &mut impl InitContext<Self>,
+    ) -> bool {
+        let sr = f64::from(buffer_config.sample_rate);
+        self.audio
+            .prepare(sr, buffer_config.max_buffer_size as usize);
+        self.analyzer_in.set_sample_rate(buffer_config.sample_rate);
+        context.set_latency_samples(0);
+        true
+    }
+
+    fn reset(&mut self) {
+        self.audio.reset();
+    }
+
     fn process(
         &mut self,
-        _buffer: &mut Buffer,
+        buffer: &mut Buffer,
         _aux: &mut AuxiliaryBuffers,
         _context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
+        // The wrappers split the buffer at parameter events (sample-accurate
+        // automation), so reading the parameters once per call is exact.
+        let bands = self.params.band_snapshot();
+        let p = audio::AudioParams {
+            bands: &bands,
+            gain_scale: f64::from(self.params.gain_scale_factor()),
+            out_gain_db: f64::from(self.params.out_gain.value()),
+            bypass: self.params.bypass.value(),
+        };
+        match buffer.as_slice() {
+            [l, r] => {
+                self.analyzer_in.push_pre(l, Some(r));
+                self.audio.process_stereo(l, r, &p);
+                self.analyzer_in.push_post(l, Some(r));
+            }
+            [m] => {
+                self.analyzer_in.push_pre(m, None);
+                self.audio.process_mono(m, &p);
+                self.analyzer_in.push_post(m, None);
+            }
+            _ => {}
+        }
         ProcessStatus::Normal
     }
 }
