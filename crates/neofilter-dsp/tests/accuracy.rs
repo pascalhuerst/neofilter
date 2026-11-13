@@ -129,11 +129,17 @@ const TOL: [[(f64, f64); 6]; 9] = [
         (2.5, 2.5),
         (5.5, 5.),
     ],
-    // Tilt Shelf
+    // Tilt Shelf. Since the tilt convention changed (a high shelf of twice the
+    // gain, shifted down by the gain) the grid's 18 dB tilt is a 36 dB shelf
+    // internally, and the matched design's error grows with the shelf gain.
+    // The first three buckets are the new measured worst case times 1.25
+    // (were 0.01/0.02, 0.08/0.15, 0.35/0.45 when tilt shared the shelf
+    // rows); the others still hold the old values (measured worst now 0.86 /
+    // 1.17 dB and 0.92 / 2.54 dB).
     [
-        (0.01, 0.02),
-        (0.08, 0.15),
-        (0.35, 0.45),
+        (0.04, 0.06),
+        (0.19, 0.43),
+        (0.41, 0.83),
         (1.5, 2.),
         (1.5, 2.5),
         (2., 15.),

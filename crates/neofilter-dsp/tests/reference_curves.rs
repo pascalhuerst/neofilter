@@ -143,3 +143,39 @@ fn reference_rule_applies_to_every_fixture_section() {
     }
     println!("{sections} fixture sections, no fallback to the matched design");
 }
+
+/// The analog-tracking guard of the Bell rule is a safety net only: on every
+/// fixture section the rule alone gives the same coefficients.
+#[test]
+fn guard_does_not_trigger_on_fixtures() {
+    use neofilter_dsp::analog::AnalogBand;
+    use neofilter_dsp::refmatch::{design_bell_section, design_bell_section_rule_only};
+    let text = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/reference_curves.json"
+    ))
+    .unwrap();
+    let json: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let (mut n, mut triggered) = (0, 0);
+    for c in json["cases"].as_array().unwrap() {
+        if c["shape"] != "bell" {
+            continue;
+        }
+        let num = |k: &str| c[k].as_f64().unwrap();
+        let (fs, q) = (num("sample_rate"), num("q"));
+        let a = AnalogBand::design(
+            Shape::Bell,
+            num("freq_hz"),
+            num("gain_db"),
+            q,
+            slope_from_db(num("slope") as u32),
+        );
+        for s in a.sections() {
+            n += 1;
+            triggered +=
+                (design_bell_section(s, q, fs) != design_bell_section_rule_only(s, q, fs)) as usize;
+        }
+    }
+    println!("{n} bell fixture sections, guard triggered {triggered} times");
+    assert_eq!(triggered, 0);
+}

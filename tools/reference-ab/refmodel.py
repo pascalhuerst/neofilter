@@ -123,8 +123,9 @@ def design_bell_section(sec, q, fs):
         if not ex: return None
         fe = ex[0]
         if len(ex) == 2 and ex[1] < 0.999*nyq:
-            # the lower extremum is skipped when it is far below the upper one or insignificant
-            if ex[0] < 0.1*ex[1] or abs(1 - ms(ex[0])/ms(0.0)) < 1e-5: fe = ex[1]
+            # the lower extremum is skipped when it is insignificant (hardly differs from the DC level)
+            depth = abs(1 - ms(ex[0])/ms(0.0))
+            if depth < 1e-5 or (ex[0] < 0.1*ex[1] and depth < 1e-3): fe = ex[1]
         d = min(0.95, 0.5/q + 0.006)
         interior = [fe*(1-d), fe*0.999, fe]; fx = min(nyq, max(0.83*nyq, 1.8*fe))
     if max(interior) >= 0.999*nyq: return None

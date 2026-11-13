@@ -50,6 +50,22 @@ impl Monic {
         ok.then_some(m)
     }
 
+    /// Monic form of a section whose leading coefficients differ by the
+    /// constant gain `k = b2 / a2` (returned): `section = k * monic`.
+    pub fn from_section_with_gain(s: &AnalogSection) -> Option<(Self, f64)> {
+        if !(s.b[2] > 0.0 && s.a[2] > 0.0) {
+            return None;
+        }
+        let k = s.b[2] / s.a[2];
+        let m = Self {
+            bz: s.b[1] / s.b[2],
+            cz: s.b[0] / s.b[2],
+            bp: s.a[1] / s.a[2],
+            cp: s.a[0] / s.a[2],
+        };
+        (k.is_finite() && k > 0.0 && m.cp > 0.0 && m.cp.is_finite()).then_some((m, k))
+    }
+
     /// Squared magnitude at `f` Hz.
     pub fn mag_sq(&self, f: f64) -> f64 {
         let w2 = (2.0 * PI * f).powi(2);
@@ -389,6 +405,17 @@ fn tracks_analog(c: &BiquadCoeffs, m: &Monic, fs: f64) -> bool {
 /// ([`tracks_analog`]) the other extremum is tried, and if that fails as well
 /// the result is `None` (the caller falls back to the matched design).
 pub fn design_bell_section(sec: &AnalogSection, q: f64, fs: f64) -> Option<BiquadCoeffs> {
+    bell_section(sec, q, fs, true)
+}
+
+/// The Bell rule exactly as identified, without the analog-tracking guard and
+/// without trying the other extremum. For tests and diagnostics: it shows
+/// whether the guard is still needed.
+pub fn design_bell_section_rule_only(sec: &AnalogSection, q: f64, fs: f64) -> Option<BiquadCoeffs> {
+    bell_section(sec, q, fs, false)
+}
+
+fn bell_section(sec: &AnalogSection, q: f64, fs: f64, guarded: bool) -> Option<BiquadCoeffs> {
     let m = Monic::from_section(sec)?;
     let nyq = 0.5 * fs;
     let ms = |f: f64| m.mag_sq(f);
@@ -398,7 +425,7 @@ pub fn design_bell_section(sec: &AnalogSection, q: f64, fs: f64) -> Option<Biqua
         let d = (1.0 / q).clamp(0.1, 0.8);
         let interior = [f0 * (1.0 - d), f0 * (1.0 - 0.05 * d), f0];
         let fx = (1.2 * f0).max(0.9 * nyq).min(nyq);
-        return bell_candidate(&m, interior, fs, fx);
+        return bell_candidate(&m, interior, fs, fx, guarded);
     }
     let (ex, n) = extrema(&m);
     if n == 0 {
@@ -406,9 +433,12 @@ pub fn design_bell_section(sec: &AnalogSection, q: f64, fs: f64) -> Option<Biqua
     }
     let mut pick = 0;
     if n == 2 && ex[1] < 0.999 * nyq {
-        // the lower extremum is skipped when far below the upper one or
-        // when it is insignificant
-        if ex[0] < 0.1 * ex[1] || (1.0 - ms(ex[0]) / ms(0.0)).abs() < 1e-5 {
+        // The lower extremum is skipped only when it is insignificant (the
+        // section hardly differs from its DC level there), or when it is far
+        // below the upper one and still shallow. A lower extremum that is a
+        // real peak must be kept (see `docs/reference-matching.md`).
+        let depth = (1.0 - ms(ex[0]) / ms(0.0)).abs();
+        if depth < 1e-5 || (ex[0] < 0.1 * ex[1] && depth < 1e-3) {
             pick = 1;
         }
     }
@@ -416,23 +446,62 @@ pub fn design_bell_section(sec: &AnalogSection, q: f64, fs: f64) -> Option<Biqua
     let try_ext = |fe: f64| {
         let interior = [fe * (1.0 - d), fe * 0.999, fe];
         let fx = (1.8 * fe).max(0.83 * nyq).min(nyq);
-        bell_candidate(&m, interior, fs, fx)
+        bell_candidate(&m, interior, fs, fx, guarded)
     };
     if let Some(c) = try_ext(ex[pick]) {
         return Some(c);
     }
-    if n == 2 {
+    if guarded && n == 2 {
         return try_ext(ex[1 - pick]);
     }
     None
 }
 
-fn bell_candidate(m: &Monic, interior: [f64; 3], fs: f64, fx: f64) -> Option<BiquadCoeffs> {
+fn bell_candidate(
+    m: &Monic,
+    interior: [f64; 3],
+    fs: f64,
+    fx: f64,
+    guarded: bool,
+) -> Option<BiquadCoeffs> {
     if !(interior[2] < 0.999 * 0.5 * fs && interior[0] > 0.0) {
         return None;
     }
     let c = interpolate_with_nyquist_fallback(&|f| m.mag_sq(f), interior, fs, fx)?;
-    tracks_analog(&c, m, fs).then_some(c)
+    (!guarded || tracks_analog(&c, m, fs)).then_some(c)
+}
+
+/// Tolerance on `|Q - 1|` for the default-Q shelf rule.
+pub const DEFAULT_Q_TOLERANCE: f64 = 1e-3;
+
+/// Default-Q shelf rule for the single 2nd-order section of a 12 dB/oct Low /
+/// High / Tilt Shelf (the caller checks shape, slope and the displayed Q, see
+/// [`DEFAULT_Q_TOLERANCE`]). `f0` is the band frequency in Hz. The section may
+/// carry a constant gain (`b2 / a2` of a high shelf or tilt), which is applied
+/// to the numerator afterwards. Five points: DC, `c (1 - d)`, `c (1 - 0.05 d)`,
+/// `c` with `c = f0 / 2`, `d = 1 / sqrt 2`, and Nyquist at the analog value at
+/// Nyquist. `None` if `c` is not below 0.999 Nyquist or the solution is not
+/// realisable; the caller then uses the matched design.
+pub fn design_shelf_section(sec: &AnalogSection, f0: f64, fs: f64) -> Option<BiquadCoeffs> {
+    let (m, k) = Monic::from_section_with_gain(sec)?;
+    let nyq = 0.5 * fs;
+    let c = 0.5 * f0;
+    if !(c > 0.0 && c < 0.999 * nyq) {
+        return None;
+    }
+    let d = std::f64::consts::FRAC_1_SQRT_2;
+    let pts = [
+        (0.0, 0.0),
+        (c * (1.0 - d), c * (1.0 - d)),
+        (c * (1.0 - 0.05 * d), c * (1.0 - 0.05 * d)),
+        (c, c),
+        (nyq, nyq),
+    ];
+    let mut r = interpolate(&|f| m.mag_sq(f), &pts, fs)?;
+    r.b0 *= k;
+    r.b1 *= k;
+    r.b2 *= k;
+    r.is_finite().then_some(r)
 }
 
 /// High-cut rule for one 2nd-order Butterworth-type low-pass section
@@ -610,6 +679,72 @@ mod tests {
             assert!(((got - ms(f0)) / ms(f0)).abs() < 1e-5);
         }
         assert!(needed >= 1, "the fallback was not exercised");
+    }
+
+    /// Largest deviation (dB) between a designed section and its analog
+    /// prototype between 10 Hz and 0.1 fs.
+    fn worst_vs_analog(c: &BiquadCoeffs, m: &Monic, fs: f64) -> f64 {
+        (0..200)
+            .map(|i| {
+                let f = 10.0 * (0.1 * fs / 10.0).powf(i as f64 / 199.0);
+                (db(c.mag_sq(2.0 * PI * f / fs)) - db(m.mag_sq(f))).abs()
+            })
+            .fold(0.0, f64::max)
+    }
+
+    /// The corrected extremum criterion alone (no guard, no second try) keeps
+    /// the 48 dB/oct bell at 1 kHz, +6 dB, Q about 3.25 within 0.01 dB of the
+    /// analog prototype; the old criterion was 1.7 dB off there.
+    #[test]
+    fn extremum_rule_needs_no_guard_around_q_3_25() {
+        let fs = 44100.0;
+        for (f0, q) in [
+            (1000.0, 3.2),
+            (1000.0, 3.24),
+            (1000.0, 3.25),
+            (1000.0, 3.26),
+            (1000.0, 3.3),
+            (500.0, 3.25),
+        ] {
+            let a = bell_sections(f0, 6.0, q, Slope::Db48);
+            for s in a.sections() {
+                let m = Monic::from_section(s).unwrap();
+                let c = design_bell_section_rule_only(s, q, fs).expect("rule applies");
+                let w = worst_vs_analog(&c, &m, fs);
+                assert!(w <= 0.01, "{f0} Hz Q {q}: {w} dB");
+            }
+        }
+    }
+
+    #[test]
+    fn default_q_shelf_rule_hits_its_points_and_falls_back() {
+        for (shape, fs) in [
+            (Shape::HighShelf, 44100.0),
+            (Shape::LowShelf, 48000.0),
+            (Shape::TiltShelf, 96000.0),
+        ] {
+            let f0 = 3000.0;
+            let a = AnalogBand::design(shape, f0, 6.0, 1.0, Slope::Db12);
+            let s = &a.sections()[0];
+            let (m, k) = Monic::from_section_with_gain(s).unwrap();
+            let c = design_shelf_section(s, f0, fs).expect("realisable");
+            assert!(c.is_stable());
+            let d = std::f64::consts::FRAC_1_SQRT_2;
+            let cc = 0.5 * f0;
+            for (fd, fa) in [
+                (0.0, 0.0),
+                (cc * (1.0 - d), cc * (1.0 - d)),
+                (cc, cc),
+                (0.5 * fs, 0.5 * fs),
+            ] {
+                let got = c.mag_sq(2.0 * PI * fd / fs);
+                let want = k * k * m.mag_sq(fa);
+                assert!(((got - want) / want).abs() < 1e-8, "{shape:?} {fd}");
+            }
+        }
+        let a = AnalogBand::design(Shape::HighShelf, 3000.0, 6.0, 1.0, Slope::Db12);
+        // c = f0 / 2 above 0.999 Nyquist
+        assert!(design_shelf_section(&a.sections()[0], 3000.0, 3000.0).is_none());
     }
 
     #[test]

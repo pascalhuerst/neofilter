@@ -5,7 +5,7 @@ use crate::biquad::{BiquadCoeffs, BiquadState};
 use crate::conventions::cut_shelf_order;
 use crate::matched::match_section;
 use crate::refmatch;
-use crate::types::{BandParams, Shape, MAX_Q, MAX_SECTIONS, MIN_Q};
+use crate::types::{BandParams, Shape, Slope, MAX_Q, MAX_SECTIONS, MIN_Q};
 
 /// Gains below this magnitude (dB) are treated as exactly flat.
 pub const FLAT_GAIN_DB: f64 = 1e-9;
@@ -44,13 +44,24 @@ impl BandDesign {
         let mut d = Self::identity();
         d.len = analog.len();
         for (o, s) in d.coeffs.iter_mut().zip(analog.sections()) {
-            // Bell (all slopes) and even-order High Cut follow the reference
-            // rule (see `refmatch`); everything else, and any section the rule
-            // cannot handle, uses the matched design.
+            // Bell (all slopes), even-order High Cut and the default-Q 12 dB/oct
+            // shelves follow the reference rule (see `refmatch`); everything
+            // else, and any section the rule cannot handle, uses the matched
+            // design.
             let r = match params.shape {
                 Shape::Bell => refmatch::design_bell_section(s, q, sample_rate),
                 Shape::HighCut if cut_shelf_order(params.slope).is_multiple_of(2) => {
                     refmatch::design_highcut_section(s, sample_rate)
+                }
+                Shape::LowShelf | Shape::HighShelf | Shape::TiltShelf
+                    if params.slope == Slope::Db12
+                        && (q - 1.0).abs() <= refmatch::DEFAULT_Q_TOLERANCE =>
+                {
+                    refmatch::design_shelf_section(
+                        s,
+                        design_frequency(params.freq_hz, sample_rate),
+                        sample_rate,
+                    )
                 }
                 _ => None,
             };

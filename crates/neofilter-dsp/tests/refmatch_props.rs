@@ -52,3 +52,43 @@ fn design_cost_is_small() {
     println!("96 dB/oct bell design: {us:.1} us per band ({acc})");
     assert!(us < 2000.0);
 }
+
+/// Counts (and bounds) the Bell sections for which the analog-tracking guard changes the
+/// result of the rule alone (guard triggered): over a dense pseudo-random
+/// sample of the property-test ranges.
+#[test]
+fn guard_trigger_rate_in_the_proptest_ranges() {
+    use neofilter_dsp::analog::AnalogBand;
+    use neofilter_dsp::refmatch::{design_bell_section, design_bell_section_rule_only};
+    let rates = [
+        22050.0, 32000.0, 44100.0, 48000.0, 88200.0, 96000.0, 176400.0, 192000.0, 384000.0,
+    ];
+    let mut rng = Noise(0x9E3779B97F4A7C15);
+    let u = |r: &mut Noise| 0.5 * (r.next() + 1.0);
+    let (mut sections, mut triggered, mut fell_back, mut high_q) = (0usize, 0usize, 0usize, 0usize);
+    for _ in 0..40000 {
+        let fs = rates[(u(&mut rng) * rates.len() as f64) as usize % rates.len()];
+        let f = 10.0 + u(&mut rng) * 29990.0;
+        let g = -30.0 + 60.0 * u(&mut rng);
+        let q = 0.025 + u(&mut rng) * 39.975;
+        let slope = Slope::ALL[(u(&mut rng) * 9.0) as usize % 9];
+        let a = AnalogBand::design(Shape::Bell, f.min(0.49 * fs), g, q, slope);
+        for s in a.sections() {
+            sections += 1;
+            let guarded = design_bell_section(s, q, fs);
+            let alone = design_bell_section_rule_only(s, q, fs);
+            if guarded != alone {
+                triggered += 1;
+                fell_back += guarded.is_none() as usize;
+                high_q += (q >= 3.0) as usize;
+            }
+        }
+    }
+    println!(
+        "{sections} bell sections, guard triggered {triggered} times ({fell_back} fell back to the \
+         matched design, {high_q} with Q >= 3)"
+    );
+    // Rare (high-Q corners, mostly far from the audio-typical range) but real:
+    // the guard stays in place. The bound documents today's rate.
+    assert!(triggered * 100 < sections, "{triggered} of {sections}");
+}

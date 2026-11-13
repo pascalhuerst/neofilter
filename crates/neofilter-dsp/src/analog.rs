@@ -16,11 +16,13 @@
 //!   DC and infinity. Gain is ignored.
 //! * Band pass: Butterworth low-pass order M through the LP->BP map, unity gain
 //!   at w0. Gain is ignored.
+//! * Tilt shelf: a high shelf of twice the gain, shifted down by the gain.
+//! * Shelf Q: the resonant pair's Q is Butterworth Q times `Q^SHELF_Q_EXPONENT`.
 //! * Flat tilt: see [`FLAT_TILT_SHELVES`].
 
 use crate::conventions::{
     bell_prototype_order, cut_shelf_order, FLAT_TILT_OCTAVES_PER_GAIN, MAX_DESIGN_FREQ_RATIO,
-    Q_DISPLAY_TO_STD,
+    Q_DISPLAY_TO_STD, SHELF_Q_EXPONENT,
 };
 use crate::types::{
     BandParams, Shape, Slope, MAX_FREQ_HZ, MAX_Q, MAX_SECTIONS, MIN_FREQ_HZ, MIN_Q,
@@ -293,8 +295,10 @@ impl AnalogBand {
             Shape::HighCut => band.cut(true, w0, cut_shelf_order(slope), q),
             Shape::LowShelf => band.shelf(false, w0, cut_shelf_order(slope), gain, q, 1.0),
             Shape::HighShelf => band.shelf(true, w0, cut_shelf_order(slope), gain, q, 1.0),
+            // Measured convention: a high shelf of twice the gain, shifted
+            // down by the gain (the response runs from -gain to +gain dB).
             Shape::TiltShelf => {
-                band.shelf(true, w0, cut_shelf_order(slope), gain, q, 1.0 / gain.sqrt())
+                band.shelf(true, w0, cut_shelf_order(slope), gain * gain, q, 1.0 / gain)
             }
             Shape::Bell => band.bell(w0, bell_prototype_order(slope), gain, q * Q_DISPLAY_TO_STD),
             Shape::Notch => band.notch(w0, bell_prototype_order(slope), q * Q_DISPLAY_TO_STD),
@@ -333,14 +337,15 @@ impl AnalogBand {
 
     /// Symmetric Butterworth shelf of order `n` and linear gain `gain`
     /// (low shelf: DC gain G, HF gain 1; high shelf: mirrored). `k` is an
-    /// extra constant (tilt). Highest-Q section's `d` is divided by `q`.
+    /// extra constant (tilt). The highest-Q section's Q is the Butterworth Q
+    /// times `q^SHELF_Q_EXPONENT` (`d` is divided by that factor).
     fn shelf(&mut self, high: bool, w0: f64, n: usize, gain: f64, q: f64, k: f64) {
         let g = gain.powf(1.0 / n as f64);
         let sg = g.sqrt();
         for i in 1..=n / 2 {
             let mut d = butter_d(n, i);
             if i == 1 {
-                d /= q;
+                d /= q.powf(SHELF_Q_EXPONENT);
             }
             let (b, a) = if high {
                 ([1.0, d * sg, g], [1.0, d / sg, 1.0 / g])
@@ -575,12 +580,12 @@ mod tests {
     }
 
     #[test]
-    fn tilt_shelf_symmetric() {
+    fn tilt_shelf_runs_from_minus_gain_to_plus_gain() {
         for slope in [Slope::Db6, Slope::Db12, Slope::Db36] {
-            let t = band(Shape::TiltShelf, 1000.0, 10.0, 1.0, slope);
+            let t = band(Shape::TiltShelf, 1000.0, 6.0, 1.0, slope);
             assert_abs_diff_eq!(t.magnitude_db(1000.0), 0.0, epsilon = 1e-9);
-            assert_abs_diff_eq!(t.magnitude_db(0.01), -5.0, epsilon = 1e-4);
-            assert_abs_diff_eq!(t.magnitude_db(1.0e7), 5.0, epsilon = 1e-4);
+            assert_abs_diff_eq!(t.magnitude_db(0.01), -6.0, epsilon = 1e-4);
+            assert_abs_diff_eq!(t.magnitude_db(1.0e7), 6.0, epsilon = 1e-4);
             // Antisymmetric around the pivot in log frequency.
             for &x in &[1.5, 3.0, 10.0] {
                 assert_abs_diff_eq!(
@@ -589,7 +594,63 @@ mod tests {
                     epsilon = 1e-9
                 );
             }
+            // tilt(g) = high_shelf(2 g) - g dB, at every frequency and Q
+            for &q in &[0.5, 1.0, 3.0] {
+                let t = band(Shape::TiltShelf, 1000.0, -4.0, q, slope);
+                let h = band(Shape::HighShelf, 1000.0, -8.0, q, slope);
+                for &f in &[50.0, 400.0, 1000.0, 2500.0, 15000.0] {
+                    assert_abs_diff_eq!(t.magnitude_db(f), h.magnitude_db(f) + 4.0, epsilon = 1e-9);
+                }
+            }
         }
+    }
+
+    /// Shelf resonance law: the resonant section's Q is the Butterworth Q
+    /// times Q_display^0.47, zero/pole frequencies unchanged.
+    #[test]
+    fn shelf_section_q_follows_the_measured_law() {
+        use crate::conventions::SHELF_Q_EXPONENT;
+        assert_eq!(SHELF_Q_EXPONENT, 0.47);
+        let f0 = 1000.0;
+        let w0 = 2.0 * PI * f0;
+        for (slope, n) in [(Slope::Db12, 2usize), (Slope::Db24, 4)] {
+            for &gdb in &[9.0, -9.0] {
+                for &q in &[0.5, 1.0, 3.0] {
+                    for high in [true, false] {
+                        let shape = if high {
+                            Shape::HighShelf
+                        } else {
+                            Shape::LowShelf
+                        };
+                        let a = band(shape, f0, gdb, q, slope);
+                        let r = 10f64.powf(gdb / 20.0 / (2.0 * n as f64));
+                        let (wz, wp) = if high {
+                            (w0 / r, w0 * r)
+                        } else {
+                            (w0 * r, w0 / r)
+                        };
+                        let qb = 1.0 / (2.0 * (PI / (2.0 * n as f64)).sin());
+                        let want = qb * q.powf(0.47);
+                        let s = &a.sections()[0];
+                        let (bz, cz) = (s.b[1] / s.b[2], s.b[0] / s.b[2]);
+                        let (bp, cp) = (s.a[1] / s.a[2], s.a[0] / s.a[2]);
+                        assert_abs_diff_eq!(cz.sqrt() / wz, 1.0, epsilon = 1e-9);
+                        assert_abs_diff_eq!(cp.sqrt() / wp, 1.0, epsilon = 1e-9);
+                        assert_abs_diff_eq!(cz.sqrt() / bz / want, 1.0, epsilon = 1e-9);
+                        assert_abs_diff_eq!(cp.sqrt() / bp / want, 1.0, epsilon = 1e-9);
+                    }
+                }
+            }
+        }
+        // 12 dB/oct, Q_display 3: section Q = 0.7071 * 3^0.47
+        let a = band(Shape::HighShelf, f0, 6.0, 3.0, Slope::Db12);
+        let s = &a.sections()[0];
+        let qp = (s.a[0] * s.a[2]).sqrt() / s.a[1];
+        assert_abs_diff_eq!(
+            qp,
+            std::f64::consts::FRAC_1_SQRT_2 * 3f64.powf(0.47),
+            epsilon = 1e-6
+        );
     }
 
     #[test]

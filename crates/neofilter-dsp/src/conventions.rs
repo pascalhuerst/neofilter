@@ -6,6 +6,20 @@ use crate::types::{Shape, Slope};
 /// Displayed Q 1.0 corresponds to textbook Q 1/sqrt(2).
 pub const Q_DISPLAY_TO_STD: f64 = std::f64::consts::FRAC_1_SQRT_2;
 
+/// Exponent of the displayed Q in the shelf resonance law: the highest-Q
+/// Butterworth pair of a Low / High / Tilt Shelf gets the section Q
+/// `Q_butterworth * Q_display^SHELF_Q_EXPONENT` (zero and pole frequencies are
+/// unchanged, first-order shelves have no Q). This is a measured fit to the
+/// reference EQ (12 and 24 dB/oct, low and high shelf, boost and cut, Q 0.5 to
+/// 6), with a residual of at most 0.003 dB in the fixtures; it is not derived
+/// from any documentation.
+pub const SHELF_Q_EXPONENT: f64 = 0.47;
+
+// Tilt shelf convention (measured): `tilt(g) = high_shelf(2 g) - g dB` at the
+// same frequency, slope and Q, so a +6 dB tilt runs from -6 dB at low
+// frequencies through 0 dB at the band frequency to +6 dB at high ones.
+// Implemented in `analog.rs`.
+
 /// Flat tilt definition: `gain_db` (after gain scale) is the total level
 /// difference in dB across this many octaves, i.e. the tilt is
 /// `gain_db / FLAT_TILT_OCTAVES_PER_GAIN` dB per octave. Positive gain lifts

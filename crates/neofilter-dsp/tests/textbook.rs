@@ -166,10 +166,7 @@ fn tilt_shelf_is_antisymmetric_about_the_pivot() {
                 );
             }
             let r = resp(&p, fs, &[10.0, 20000.0]);
-            assert!(
-                (r[0] + g / 2.0).abs() < 0.2 && (r[1] - g / 2.0).abs() < 0.3,
-                "{r:?}"
-            );
+            assert!((r[0] + g).abs() < 0.3 && (r[1] - g).abs() < 0.6, "{r:?}");
         }
     }
 }
