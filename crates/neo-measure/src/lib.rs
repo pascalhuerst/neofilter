@@ -37,9 +37,11 @@ pub mod riaa;
 mod riaa_tables;
 pub mod spectrum;
 pub mod stereo;
+pub mod sweep_track;
 pub mod tone;
 pub mod transfer;
 pub mod util;
+pub mod velocity;
 pub mod weighting;
 pub mod wow_flutter;
 

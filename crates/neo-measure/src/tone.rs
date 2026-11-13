@@ -227,6 +227,34 @@ pub fn tone_level_at(x: &[f64], fs: f64, freq: f64) -> f64 {
     amp_db(2.0 * dtft_mag(&p.xw, freq, fs) / p.s1)
 }
 
+/// Phase of `a` relative to `b` in degrees (`-180..=180`) at exactly `freq`
+/// Hz, from Blackman-Harris windowed DTFTs of both blocks (same length).
+/// `None` for short or mismatched blocks or if either channel has no energy
+/// at `freq`.
+pub fn phase_difference_deg(a: &[f64], b: &[f64], fs: f64, freq: f64) -> Option<f64> {
+    if a.len() != b.len() || a.len() < 16 {
+        return None;
+    }
+    let za = dtft_complex(a, fs, freq);
+    let zb = dtft_complex(b, fs, freq);
+    if za.norm() <= 1e-300 || zb.norm() <= 1e-300 {
+        return None;
+    }
+    let z = za * zb.conj();
+    Some(z.im.atan2(z.re).to_degrees())
+}
+
+fn dtft_complex(x: &[f64], fs: f64, f: f64) -> crate::util::Complex {
+    let p = prepare(x, Window::BlackmanHarris);
+    let step = 2.0 * PI * f / fs;
+    let mut acc = crate::util::Complex::new(0.0, 0.0);
+    for (i, &v) in p.xw.iter().enumerate() {
+        let ph = step * i as f64;
+        acc += crate::util::Complex::new(ph.cos(), -ph.sin()) * v;
+    }
+    acc
+}
+
 /// Channel separation (crosstalk) in dB, positive numbers meaning better
 /// separation: level of the tone in `driven` minus its level at the same
 /// frequency in `other`. The frequency is taken from the driven channel.
@@ -257,6 +285,24 @@ mod tests {
                         .sum::<f64>()
             })
             .collect()
+    }
+
+    #[test]
+    fn phase_difference_of_shifted_tones() {
+        let fs = 48_000.0;
+        let mk = |ph: f64| -> Vec<f64> {
+            (0..24_000)
+                .map(|i| (2.0 * PI * 1002.0 * i as f64 / fs + ph).sin())
+                .collect()
+        };
+        let a = mk(0.5);
+        for deg in [0.0f64, 30.0, 90.0, 179.0, -120.0] {
+            let b = mk(0.5 - deg.to_radians());
+            let d = phase_difference_deg(&a, &b, fs, 1002.0).unwrap();
+            assert!((d - deg).abs() < 0.01, "{d} vs {deg}");
+        }
+        assert!(phase_difference_deg(&a, &a[..100], fs, 1002.0).is_none());
+        assert!(phase_difference_deg(&a, &vec![0.0; a.len()], fs, 1002.0).is_none());
     }
 
     #[test]
