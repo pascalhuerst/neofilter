@@ -11,6 +11,19 @@ use nih_plug::prelude::ParamSetter;
 use nih_plug_egui::egui::{self, Event, Ui};
 use std::sync::atomic::Ordering;
 
+/// Text pasted into the window this frame. egui-baseview turns Ctrl+V into
+/// `Event::Text` carrying the clipboard contents (it never emits
+/// `Event::Paste`), while other backends emit `Event::Paste`. Typed characters
+/// also arrive as `Event::Text`, so those only count when they look like a
+/// preset (JSON object).
+fn pasted_text(events: &[Event]) -> Option<String> {
+    events.iter().find_map(|e| match e {
+        Event::Paste(s) => Some(s.clone()),
+        Event::Text(s) if s.trim_start().starts_with('{') => Some(s.clone()),
+        _ => None,
+    })
+}
+
 pub fn show(ui: &mut Ui, state: &mut EditorState, setter: &ParamSetter) {
     let params = state.params.clone();
     ui.horizontal_wrapped(|ui| {
@@ -65,12 +78,7 @@ pub fn show(ui: &mut Ui, state: &mut EditorState, setter: &ParamSetter) {
             };
         }
         if state.paste_armed {
-            let pasted = ui.ctx().input(|i| {
-                i.events.iter().find_map(|e| match e {
-                    Event::Paste(s) => Some(s.clone()),
-                    _ => None,
-                })
-            });
+            let pasted = ui.ctx().input(|i| pasted_text(&i.events));
             if let Some(text) = pasted {
                 state.paste_armed = false;
                 match PresetFile::from_json(&text) {
@@ -147,4 +155,25 @@ pub fn show(ui: &mut Ui, state: &mut EditorState, setter: &ParamSetter) {
             ui.weak(&state.status);
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn paste_arrives_as_text_with_egui_baseview() {
+        let json = "{ \"version\": 1 }";
+        assert_eq!(
+            pasted_text(&[Event::Text(json.into())]),
+            Some(json.to_string())
+        );
+        assert_eq!(
+            pasted_text(&[Event::Paste(json.into())]),
+            Some(json.to_string())
+        );
+        // typed characters are not a paste
+        assert_eq!(pasted_text(&[Event::Text("a".into())]), None);
+        assert_eq!(pasted_text(&[]), None);
+    }
 }
