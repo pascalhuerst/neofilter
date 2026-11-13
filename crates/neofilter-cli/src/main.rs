@@ -2,13 +2,14 @@
 //! rendering and impulse-response comparison (calibration).
 
 mod compare;
+mod ffp;
 mod model;
 mod wavio;
 
 use clap::{Parser, Subcommand};
 use model::{log_space, PresetSel};
 use neofilter::audio::{AudioParams, AudioPath};
-use neofilter::presets::factory_presets;
+use neofilter::presets::{factory_presets, PresetFile};
 use std::fmt::Write as _;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -71,6 +72,32 @@ enum Command {
         #[arg(long, value_name = "WAV")]
         ir: PathBuf,
     },
+    /// Write a preset as an `.ffp` EQ preset file (24 bands, Stereo placement only).
+    ///
+    /// Settings this tool does not model (dynamics, global options) are
+    /// copied from the template, which must be an existing `.ffp` export.
+    ExportFfp {
+        #[command(flatten)]
+        preset: PresetSel,
+        /// An existing `.ffp` file exported from the target EQ.
+        #[arg(long, value_name = "FFP")]
+        template: PathBuf,
+        #[arg(long, value_name = "FFP")]
+        output: PathBuf,
+    },
+    /// Convert an `.ffp` EQ preset file into NeoFilter preset JSON (for "Paste preset").
+    ImportFfp {
+        #[arg(long, value_name = "FFP")]
+        input: PathBuf,
+        /// Write the JSON to this file instead of printing it.
+        #[arg(long, value_name = "FILE")]
+        output: Option<PathBuf>,
+    },
+}
+
+fn read_ffp(path: &std::path::Path) -> Result<ffp::FfpFile, String> {
+    let bytes = std::fs::read(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+    ffp::FfpFile::parse(&bytes).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 fn check_rate(sr: f64) -> Result<(), String> {
@@ -221,6 +248,50 @@ fn run(cli: Cli) -> Result<String, String> {
                     "  {:>10.1} {:>10.1} {:>10.1} {:>9.4} {:>+9.4}",
                     g.lo, g.hi, g.worst_freq, g.max_abs_db, g.mean_db
                 );
+            }
+        }
+        Command::ExportFfp {
+            preset,
+            template,
+            output,
+        } => {
+            let model = preset.resolve()?;
+            if (model.gain_scale - 1.0).abs() > 1e-9 || model.out_gain_db.abs() > 1e-9 {
+                return Err(
+                    "preset uses gain scale or output gain, which cannot be exported".into(),
+                );
+            }
+            let mut file = read_ffp(&template)?;
+            file.set_bands(&model.bands)?;
+            std::fs::write(&output, file.to_bytes())
+                .map_err(|e| format!("cannot write {}: {e}", output.display()))?;
+            let used = model.bands.iter().filter(|b| b.used).count();
+            let _ = writeln!(
+                out,
+                "wrote '{}' ({used} bands) to {}",
+                model.name,
+                output.display()
+            );
+        }
+        Command::ImportFfp { input, output } => {
+            let bands = read_ffp(&input)?
+                .bands()
+                .map_err(|e| format!("{}: {e}", input.display()))?;
+            let name = input
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let json = PresetFile::from_band_params(&name, 100.0, 0.0, &bands).to_json();
+            match output {
+                Some(path) => {
+                    std::fs::write(&path, json)
+                        .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+                    let used = bands.iter().filter(|b| b.used).count();
+                    let _ = writeln!(out, "wrote {used} bands to {}", path.display());
+                }
+                None => {
+                    let _ = writeln!(out, "{json}");
+                }
             }
         }
     }

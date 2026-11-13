@@ -30,6 +30,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   commands (preset ids or preset JSON files).
 - GitHub Actions CI and tag-triggered release workflow.
 
+- `neofilter-cli export-ffp` / `import-ffp`: convert presets to and from
+  `.ffp` preset files (bands only; 24 bands, Stereo placement).
+
 ### Known limitations
 
 - The matched digital filters do not meet the blanket 0.1 dB / 0.5 dB target

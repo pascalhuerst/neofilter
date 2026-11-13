@@ -213,6 +213,29 @@ writes 32-bit float. `compare` takes the FFT of a measured impulse response
 against the digital model between 20 Hz and 20 kHz, the worst frequency and
 the ten worst third-octave regions.
 
+### Exchanging presets with Pro-Q 3 (`.ffp` files)
+
+The CLI can write and read `.ffp` preset files, so settings do not have to be
+typed in by hand in either direction:
+
+```sh
+# NeoFilter preset -> .ffp (needs any .ffp exported from Pro-Q 3 as template)
+cargo run -p neofilter-cli -- export-ffp --preset friend-eq-ab \
+    --template exported.ffp --output friend-eq-ab.ffp
+
+# .ffp -> NeoFilter preset JSON (then "Paste preset" in the plugin)
+cargo run -p neofilter-cli -- import-ffp --input exported.ffp --output preset.json
+```
+
+The file layout was worked out from an exported preset file only. Bands
+(used, enabled, shape, frequency, gain, Q, slope) are converted; dynamics and
+all global settings are copied from the template on export and ignored on
+import. The format holds 24 bands, so presets using bands 25-32 cannot be
+exported, and only Stereo placement is supported. Shape codes for Bell, Low
+Shelf and High Shelf are confirmed by a sample file; the other shape and
+slope codes follow the menu order and have not been checked in Pro-Q 3 —
+verify a generated preset there after loading it.
+
 ## How it works
 
 Each band is designed as an analog prototype (Butterworth-based cascade of

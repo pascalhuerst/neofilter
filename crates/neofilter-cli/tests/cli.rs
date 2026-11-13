@@ -331,3 +331,86 @@ fn errors_are_reported_cleanly() {
     }
     let _ = Path::new(&out);
 }
+
+/// A minimal `.ffp` template: 24 unused default bands plus 46 global values.
+fn ffp_template() -> Vec<u8> {
+    let unused: [f32; 13] = [
+        0.0, 0.0, 9.965_784, 0.0, 0.0, 1.0, 1.0, 0.5, 0.0, 1.0, 2.0, 1.0, 0.0,
+    ];
+    let mut values: Vec<f32> = Vec::new();
+    for _ in 0..24 {
+        values.extend_from_slice(&unused);
+    }
+    values.extend(std::iter::repeat_n(0.0, 46));
+    let mut bytes = b"FQ3p".to_vec();
+    bytes.extend_from_slice(&4u32.to_le_bytes());
+    bytes.extend_from_slice(&(values.len() as u32).to_le_bytes());
+    for v in values {
+        bytes.extend_from_slice(&v.to_le_bytes());
+    }
+    bytes
+}
+
+#[test]
+fn ffp_export_then_import_reproduces_the_curve() {
+    let d = Dir::new("ffp");
+    let (tpl, ffp, json) = (d.file("tpl.ffp"), d.file("ab.ffp"), d.file("ab.json"));
+    std::fs::write(&tpl, ffp_template()).unwrap();
+
+    let o = cli(&[
+        "export-ffp",
+        "--preset",
+        "friend-eq-ab",
+        "--template",
+        &tpl,
+        "--output",
+        &ffp,
+    ]);
+    assert!(o.status.success(), "{}", stderr(&o));
+    assert!(stdout(&o).contains("24 bands"));
+    assert_eq!(std::fs::read(&ffp).unwrap().len(), 1444);
+
+    let o = cli(&["import-ffp", "--input", &ffp, "--output", &json]);
+    assert!(o.status.success(), "{}", stderr(&o));
+
+    let a = cli(&["curve", "--preset", "friend-eq-ab", "--points", "200"]);
+    let b = cli(&["curve", "--preset-file", &json, "--points", "200"]);
+    assert!(a.status.success() && b.status.success());
+    let parse = |o: &Output| -> Vec<f64> {
+        stdout(o)
+            .lines()
+            .skip(1)
+            .map(|l| l.split(',').nth(1).unwrap().parse().unwrap())
+            .collect()
+    };
+    let (a, b) = (parse(&a), parse(&b));
+    assert_eq!(a.len(), 200);
+    // The file stores f32 values; the curve must survive that within 0.001 dB.
+    for (x, y) in a.iter().zip(&b) {
+        assert!((x - y).abs() < 1e-3, "{x} vs {y}");
+    }
+}
+
+#[test]
+fn ffp_errors_are_reported_cleanly() {
+    let d = Dir::new("ffp-err");
+    let bad = d.file("bad.ffp");
+    std::fs::write(&bad, b"not a preset").unwrap();
+    for args in [
+        vec!["import-ffp", "--input", &bad],
+        vec!["import-ffp", "--input", "/nonexistent.ffp"],
+        vec![
+            "export-ffp",
+            "--preset",
+            "friend-eq-a",
+            "--template",
+            &bad,
+            "--output",
+            "/tmp/x.ffp",
+        ],
+    ] {
+        let o = cli(&args);
+        assert_eq!(o.status.code(), Some(1), "{args:?}");
+        assert!(stderr(&o).starts_with("error:"), "{}", stderr(&o));
+    }
+}
