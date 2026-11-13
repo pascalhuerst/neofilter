@@ -26,6 +26,15 @@ pub fn cut_shelf_order(slope: Slope) -> usize {
 
 /// Low-pass prototype order M of a bell/notch/band-pass: max(1, slope / 12).
 /// The resulting band filter has order 2M (6 dB/oct behaves as 12).
+///
+/// Notch and band pass definitions (not specified by the public Pro-Q
+/// documentation): both use `Qs = Q_DISPLAY_TO_STD * Q_display` and a
+/// Butterworth prototype of order M through the low-pass to band-pass map
+/// `s -> Qs (s/w0 + w0/s)`. The band pass has unity gain at the band
+/// frequency (for M = 1 the -3 dB edges are `1/Qs` band-frequency units
+/// apart); the notch has M-fold zeros on the jw axis at the band frequency and
+/// the same Butterworth band-stop poles, unity gain at DC and infinity. Gain is
+/// ignored by both. The formulas live in `analog.rs`.
 pub fn bell_prototype_order(slope: Slope) -> usize {
     ((slope.db_per_oct() / 12) as usize).max(1)
 }

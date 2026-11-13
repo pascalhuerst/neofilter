@@ -21,13 +21,25 @@
 //!    the damping of the poles and zeros). Much better than three points when
 //!    features are sharp or close to Nyquist, and the only way to get a double
 //!    zero at DC (low cut) right.
-//! 3. [`Method::Refined`] (default): starts from 2. and, if the log-magnitude
-//!    error at the sample set exceeds 0.005 dB, refines numerator *and*
-//!    denominator with a few Sanathanan-Koerner iterations (each a small linear
-//!    weighted least squares problem in the phi basis, DC constraint kept
-//!    exact). This gives up exact impulse invariance of the poles for the sake
-//!    of overall magnitude accuracy; it is what makes wide shelves and bells at
-//!    several kHz accurate.
+//! 3. [`Method::Refined`] (default): starts from 2. If the weighted dB error on
+//!    an independent validation grid (quarter-octave plus cluster offsets)
+//!    exceeds 0.005 dB it also builds a three-point candidate and a free-pole
+//!    candidate (a few Sanathanan-Koerner iterations; each is a small linear
+//!    weighted least squares problem in the phi basis with the DC match kept
+//!    exact) and keeps whichever has the smallest validation error. The
+//!    validation step matters: the refinement can lower the *training* error
+//!    while making unsampled frequencies worse (measured on 96 dB/oct band
+//!    passes), so candidates are never chosen on the data they were fitted to.
+//!
+//! Measured effect (worst dB over the grid of `tests/accuracy.rs`): for a wide
+//! bell the three-point error is 0.47 dB, least squares 0.24 dB and the
+//! refined design 0.21 dB; for cuts the least-squares numerator is the only
+//! one with a correct stop band (the three-point fit loses the double zero at
+//! DC and is off by tens of dB). A band-wide joint refinement or sequential
+//! error compensation between sections was tried: compensation made the
+//! 48 dB/oct low pass of the second friend preset worse (1.5 -> 2.7 dB) and
+//! was dropped; a joint refinement of all sections would cost 10-50x more
+//! design time and was not attempted.
 //!
 //! Structure that must not be lost is preserved: a double analog zero at DC
 //! stays a double zero at z = 1 (`B ~ phi1^2`), and zeros on the jw axis (notch)
@@ -843,4 +855,145 @@ pub fn match_band(analog: &AnalogBand, fs: f64, out: &mut [BiquadCoeffs; MAX_SEC
         *o = match_section(s, fs);
     }
     n
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::{Shape, Slope};
+    use approx::assert_abs_diff_eq;
+
+    fn db(p: f64) -> f64 {
+        10.0 * p.log10()
+    }
+
+    #[test]
+    fn phi_basis_formulas_match_direct_evaluation() {
+        let c = BiquadCoeffs {
+            b0: 0.7,
+            b1: -0.2,
+            b2: 0.35,
+            a1: -1.3,
+            a2: 0.6,
+        };
+        let f = c.phi_form();
+        for i in 1..40 {
+            let w = i as f64 * 0.0781;
+            let (re, im) = c.response(w);
+            let phi1 = (0.5 * w).sin().powi(2);
+            assert_abs_diff_eq!(f.mag_sq_phi1(phi1), re * re + im * im, epsilon = 1e-12);
+        }
+        // the closed-form factorisation inverts the form
+        let n = factor(&f.b).unwrap();
+        assert_abs_diff_eq!(n[0], 0.7, epsilon = 1e-12);
+        assert_abs_diff_eq!(n[1], -0.2, epsilon = 1e-12);
+        assert_abs_diff_eq!(n[2], 0.35, epsilon = 1e-12);
+    }
+
+    #[test]
+    fn three_point_is_exact_at_its_three_frequencies() {
+        let fs = 48000.0;
+        let a = AnalogBand::design(Shape::Bell, 3000.0, 9.0, 2.0, Slope::Db12);
+        let sec = a.sections()[0];
+        let c = match_section_with(&sec, fs, Method::ThreePoint);
+        for f in [0.0, 24000.0, 3000.0] {
+            let analog = db(sec.mag_sq(2.0 * PI * f));
+            let digital = db(c.mag_sq(2.0 * PI * f / fs));
+            assert_abs_diff_eq!(analog, digital, epsilon = 1e-9);
+        }
+    }
+
+    #[test]
+    fn poles_are_impulse_invariant_for_exact_pole_methods() {
+        let fs = 48000.0;
+        let a = AnalogBand::design(Shape::Bell, 3000.0, -9.0, 5.0, Slope::Db12);
+        let sec = a.sections()[0];
+        for m in [Method::ThreePoint, Method::LeastSquares] {
+            let c = match_section_with(&sec, fs, m);
+            let half = 0.5 * sec.a[1] / sec.a[2];
+            let wd = (sec.a[0] / sec.a[2] - half * half).sqrt();
+            let r = (-half / fs).exp();
+            assert_abs_diff_eq!(c.a2, r * r, epsilon = 1e-13);
+            assert_abs_diff_eq!(c.a1, -2.0 * r * (wd / fs).cos(), epsilon = 1e-13);
+        }
+    }
+
+    #[test]
+    fn dc_is_matched_exactly_by_every_method() {
+        for m in [Method::ThreePoint, Method::LeastSquares, Method::Refined] {
+            for shape in [
+                Shape::Bell,
+                Shape::LowShelf,
+                Shape::HighShelf,
+                Shape::HighCut,
+            ] {
+                let a = AnalogBand::design(shape, 5000.0, 12.0, 3.0, Slope::Db24);
+                for s in a.sections() {
+                    let c = match_section_with(s, 44100.0, m);
+                    assert_abs_diff_eq!(db(s.mag_sq(0.0)), db(c.mag_sq(0.0)), epsilon = 1e-7);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn low_cut_keeps_its_double_zero_at_dc() {
+        let a = AnalogBand::design(Shape::LowCut, 500.0, 0.0, 1.0, Slope::Db12);
+        for m in [Method::LeastSquares, Method::Refined] {
+            let c = match_section_with(&a.sections()[0], 48000.0, m);
+            assert_abs_diff_eq!(c.b0 + c.b1 + c.b2, 0.0, epsilon = 1e-15);
+            assert_abs_diff_eq!(c.b1, -2.0 * c.b0, epsilon = 1e-15);
+            assert_abs_diff_eq!(c.b2, c.b0, epsilon = 1e-15);
+        }
+    }
+
+    #[test]
+    fn notch_zeros_stay_on_the_unit_circle() {
+        let fs = 44100.0;
+        let a = AnalogBand::design(Shape::Notch, 7000.0, 0.0, 3.0, Slope::Db12);
+        let c = match_section_with(&a.sections()[0], fs, Method::Refined);
+        assert_abs_diff_eq!(c.b0, c.b2, epsilon = 1e-15);
+        let theta = 2.0 * PI * 7000.0 / fs;
+        assert_abs_diff_eq!(c.b1 / c.b0, -2.0 * theta.cos(), epsilon = 1e-12);
+    }
+
+    #[test]
+    fn extreme_sections_never_produce_garbage() {
+        // above-Nyquist natural frequency, huge Q, tiny Q, zero gain
+        for &fs in &[44100.0, 192000.0] {
+            for shape in Shape::ALL {
+                for &(f, q, g) in &[
+                    (0.49 * fs, 40.0_f64, 30.0),
+                    (10.0, 0.025, -30.0),
+                    (30000.0, 40.0, 0.0),
+                    (10.0, 40.0, 60.0),
+                ] {
+                    let f: f64 = f;
+                    let a = AnalogBand::design(shape, f.min(0.49 * fs), g, q, Slope::Db96);
+                    for s in a.sections() {
+                        for m in [Method::ThreePoint, Method::LeastSquares, Method::Refined] {
+                            let c = match_section_with(s, fs, m);
+                            assert!(
+                                c.is_finite() && c.is_stable(),
+                                "{shape:?} {f} {q} {g} {m:?}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn bilinear_fallback_is_stable_and_exact_at_the_prewarp_frequency() {
+        let a = AnalogBand::design(Shape::Bell, 2000.0, 6.0, 1.0, Slope::Db12);
+        let s = a.sections()[0];
+        let c = bilinear(&s, 48000.0, 2.0 * PI * 2000.0);
+        assert!(c.is_stable());
+        assert_abs_diff_eq!(
+            db(s.mag_sq(2.0 * PI * 2000.0)),
+            db(c.mag_sq(2.0 * PI * 2000.0 / 48000.0)),
+            epsilon = 1e-9
+        );
+    }
 }
