@@ -18,3 +18,5 @@ atomic_float = "1"
 approx = "0.5"
 proptest = "1"
 realfft = "3"
+# Same source as nih-plug's (debug builds install its aborting allocator).
+assert_no_alloc = { git = "https://github.com/robbert-vdh/rust-assert-no-alloc.git", branch = "feature/nested-permit-forbid" }
