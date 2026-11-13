@@ -134,9 +134,14 @@ generalised):
   third match point; then bilinear transform with prewarping. Never produce
   NaN or unstable coefficients. Frequencies ≥ 0.49*fs are clamped.
 
-Accuracy targets (tests): for all shapes/slopes, |digital − analog| magnitude
-≤ 0.1 dB from 10 Hz to 0.4*fs and ≤ 0.5 dB up to 0.45*fs at 44.1/48/96 kHz
-for band frequencies ≤ 16 kHz (document any setting that cannot meet this).
+Accuracy (as built): the original blanket target (0.1 dB up to 0.4 fs, 0.5 dB
+up to 0.45 fs) was **not** met. The enforced, measured regression tolerances
+per shape and frequency bucket are in
+`crates/neofilter-dsp/tests/accuracy.rs`. In short: bells in the everyday range
+(Q 1 to 3, up to 6 dB gain, up to 24 dB/oct) are within about 0.23 dB up to
+16 kHz at 44.1 kHz; high-Q shelves and cuts, wide notches and 96 dB/oct band
+passes near Nyquist deviate by several dB (up to ~15 dB in the extreme corners).
+See "Future work".
 
 ### Runtime engine
 
@@ -216,6 +221,14 @@ for band frequencies ≤ 16 kHz (document any setting that cannot meet this).
 | 11 | Bell | 10011 | +2.64 | 5.95 | 12 |
 | 12 | Bell | 165.7 | +2.06 | 2.97 | 48 |
 
+## Future work
+
+- Improve near-Nyquist matching (joint / free-pole fit) so that high-Q
+  shelves, cuts, wide notches and high-order band passes meet the original
+  0.1 / 0.5 dB targets.
+- Out-of-scope v0.1 items: linear-phase and natural-phase modes, dynamic EQ,
+  brickwall slope, EQ match, band solo, auto-gain, surround.
+
 ## Calibration (black-box, optional but recommended)
 
 The Q scaling and the bandwidth definition of high-slope bells are the two
@@ -224,7 +237,8 @@ conventions that cannot be confirmed from literature. To verify:
 1. On the reference system, render a unit impulse (or sine sweep) through the
    reference EQ with the preset, at 48 kHz, 32-bit float WAV.
 2. `cargo run -p neofilter-cli -- compare --preset friend-eq-a --ir ir.wav`
-   prints max / RMS deviation in dB and a per-band hint.
+   prints max / RMS deviation in dB, the worst frequency and the ten worst
+   third-octave regions.
 3. Adjust constants in `conventions.rs` only.
 
 ## Testing

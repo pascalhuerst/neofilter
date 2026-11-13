@@ -7,8 +7,9 @@ Its band parameters (Shape, Frequency, Gain, Q, Slope) follow the same
 conventions as FabFilter Pro-Q 3. A setting from a Pro-Q 3 band table can be
 typed in number by number and is designed to give a closely matching curve.
 
-> **Status:** v0.1 is in development. Items marked *(planned)* below are part
-> of the v0.1 plan ([PLAN.md](PLAN.md)) and may not be complete yet.
+> **Status:** v0.1 is feature complete but has not yet been verified in a real
+> host or against measurements of the reference EQ, see
+> [Accuracy](#accuracy).
 
 ## Not affiliated with FabFilter
 
@@ -18,10 +19,25 @@ or endorsed by FabFilter and contains no FabFilter code. "FabFilter" and
 "Pro-Q" are trademarks of their respective owner and are used here only to
 describe parameter compatibility.
 
-Curves are designed to match closely. Exact equivalence for high-slope bells
-and for the Q scaling depends on a calibration step against measured impulse
-responses, described in [PLAN.md](PLAN.md#calibration-black-box-optional-but-recommended);
-until that has been done, treat those two cases as approximate.
+Exact equivalence of the Q scaling and of high-slope bells depends on a
+calibration step against measured impulse responses, described in
+[PLAN.md](PLAN.md#calibration-black-box-optional-but-recommended); until that
+has been done, treat those two cases as approximate.
+
+## Accuracy
+
+The digital filters follow the analog prototypes closely in the everyday
+range, but not everywhere. The enforced, measured tolerances are in
+[`crates/neofilter-dsp/tests/accuracy.rs`](crates/neofilter-dsp/tests/accuracy.rs):
+
+- Bells in the everyday range (Q 1 to 3, up to 6 dB gain, up to 24 dB/oct)
+  stay within about 0.23 dB of the analog curve up to 16 kHz at 44.1 kHz.
+- High-Q shelves, cuts, wide notches and 96 dB/oct band passes, and any band
+  near Nyquist, deviate from the analog prototype by several dB (up to about
+  15 dB in the extreme corners of the grid, close to Nyquist). The editor
+  curve shows the actual digital response, so what you see is what you hear.
+- The blanket 0.1 dB / 0.5 dB target of the original plan was **not** met.
+  Improving near-Nyquist matching (joint / free-pole fit) is future work.
 
 ## Features
 
@@ -35,11 +51,13 @@ until that has been done, treat those two cases as approximate.
   Nyquist, 64-bit internal processing, click-free parameter changes.
 - Global output gain (±36 dB), gain scale (0 to 200 %), host-mapped bypass.
 - Stereo and mono layouts.
-- Resizable GUI *(planned)*: response curve, draggable band nodes, selected-band
-  strip with text entry for all values, pre/post spectrum analyzer, preset menu.
-- Factory presets "Friend EQ A" and "Friend EQ B" *(planned)*.
-- `neofilter-cli` *(planned)*: prints a preset's response curve and compares it
-  to a measured impulse-response WAV.
+- Resizable GUI (default 900x560): response curve (sum and per-band),
+  draggable band nodes, selected-band strip with text entry for all values,
+  pre/post spectrum analyzer, preset menu, "Copy preset" / "Paste preset".
+- Factory presets "Default", "Friend EQ A" and "Friend EQ B".
+- `neofilter-cli`: lists presets, prints/exports a preset's response curve,
+  renders WAV files through a preset, writes impulse responses and compares a
+  measured impulse-response WAV with the model (see [CLI](#command-line-tool)).
 
 Not included in v0.1: linear-phase and natural-phase modes, dynamic EQ,
 brickwall slope, EQ match, band solo, auto-gain, surround. Only the
@@ -102,8 +120,8 @@ cp -r target/bundled/neofilter.vst3 ~/.vst3/
 ## Usage
 
 To transfer a setting from a Pro-Q 3 band table, create a band and type the
-values into the selected-band strip *(planned)*, or enter them via your
-host's parameter editor:
+values into the selected-band strip (click a value and type), or enter them
+via your host's parameter editor:
 
 | Table column | NeoFilter control |
 |---|---|
@@ -115,8 +133,28 @@ host's parameter editor:
 | On / off | Band enable |
 | Band number | Band N (placement defaults to Stereo) |
 
-Parameter ids (`b{n}_freq` and so on) are stable, so saved sessions and
-automation survive updates.
+Parameter ids (`freq_{n}`, `gain_{n}`, `q_{n}`, `used_{n}`, `on_{n}`,
+`shape_{n}`, `slope_{n}`, `place_{n}` with n = 1..24, plus `out_gain`,
+`gain_scale`, `bypass`) are stable, so saved sessions and automation survive
+updates.
+
+Editor interactions:
+
+- Drag a node: frequency and gain (Shift: fine, Ctrl/Cmd: lock to one axis).
+- Mouse wheel over a node: Q.
+- Double-click empty space: add a band in the first free slot (a low cut at
+  the far left, a high cut at the far right, otherwise a bell).
+- Double-click a node: reset its gain to 0 dB.
+- Right-click a node: enable, shape, slope, placement, remove. Right-click
+  empty space: add a band.
+- Selected-band strip: enable, shape, remove, frequency, gain, Q, slope,
+  placement, with previous/next band buttons.
+- Top bar: preset menu, Copy preset (current settings as JSON to the
+  clipboard), Paste preset (click it, then press Ctrl+V to apply a copied
+  preset), gain scale, output gain, bypass, analyzer switch and dB range.
+
+Bypass is a soft bypass (10 ms crossfade, no latency). The processing runs at
+zero latency.
 
 The factory presets "Friend EQ A" (15 bands) and "Friend EQ B" (9 bands) are
 reproductions of two such tables and serve as worked examples; their values
@@ -124,6 +162,33 @@ are listed in [PLAN.md](PLAN.md). Applying a preset resets unused bands.
 
 Gain scale multiplies the dB gain of every Bell, Shelf and Tilt band, so you
 can dial an overall EQ amount up or down.
+
+Flat Tilt: the Gain value is the level difference across 10 octaves (roughly
+20 Hz to 20 kHz), so the slope is Gain / 10 dB per octave (30 dB is 3 dB/oct).
+Positive gain lifts the highs and lowers the lows, pivoting at the band
+frequency; slope and Q are ignored.
+
+## Command line tool
+
+`neofilter-cli` reuses the plugin's presets and audio path. Everywhere a
+`--preset <id>` is accepted you can use `--preset-file preset.json` instead
+(the JSON produced by "Copy preset"). The model includes the preset's output
+gain.
+
+```sh
+cargo run -p neofilter-cli -- list
+cargo run -p neofilter-cli -- curve --preset friend-eq-a --sample-rate 48000 \
+    --points 512 [--analog] [--csv curve.csv]
+cargo run -p neofilter-cli -- render --preset friend-eq-a --input in.wav --output out.wav
+cargo run -p neofilter-cli -- impulse --preset friend-eq-a --sample-rate 48000 --output ir.wav
+cargo run -p neofilter-cli -- compare --preset friend-eq-a --ir measured.wav
+```
+
+`render` reads 8 to 32-bit integer or 32-bit float WAV (mono or stereo) and
+writes 32-bit float. `compare` takes the FFT of a measured impulse response
+(left channel, the WAV's sample rate) and reports max and RMS deviation in dB
+against the digital model between 20 Hz and 20 kHz, the worst frequency and
+the ten worst third-octave regions.
 
 ## How it works
 

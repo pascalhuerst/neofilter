@@ -15,7 +15,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   in 64-bit precision, smoothed parameters and click-free topology changes.
 - Per-band stereo placement (Stereo, Left, Right, Mid, Side), output gain and
   gain scale.
-- egui editor with response curve, draggable nodes and spectrum analyzer.
-- Factory presets "Friend EQ A" and "Friend EQ B".
-- `neofilter-cli` for response export and impulse-response comparison.
+- egui editor with response curve, draggable nodes, selected-band strip,
+  spectrum analyzer, and "Copy preset" / "Paste preset" (JSON via clipboard).
+- Factory presets "Default", "Friend EQ A" and "Friend EQ B".
+- Audio path with smoothed output gain and a click-free 10 ms soft bypass;
+  host buffers of any size are processed without allocation.
+- `neofilter-cli` with `list`, `curve`, `render`, `impulse` and `compare`
+  commands (preset ids or preset JSON files).
 - GitHub Actions CI and tag-triggered release workflow.
+
+### Known limitations
+
+- The matched digital filters do not meet the blanket 0.1 dB / 0.5 dB target
+  of the original plan: bells in the everyday range stay within about 0.23 dB
+  up to 16 kHz at 44.1 kHz, but high-Q shelves/cuts, wide notches and
+  96 dB/oct band passes near Nyquist deviate by several dB. The enforced
+  tolerances are in `crates/neofilter-dsp/tests/accuracy.rs`.
+- Not yet verified in a real host or against measurements of the reference EQ.
