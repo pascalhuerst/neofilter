@@ -5,11 +5,12 @@
 //! `used_n`, `on_n`, `shape_n`, `freq_n`, `gain_n`, `q_n`, `slope_n`, `place_n`.
 //! Globals: `bypass`, `out_gain` (dB), `gain_scale` (percent, 0..200).
 
+use crate::calibration::CalPersist;
 use neofilter_dsp::types::NUM_BANDS;
 use neofilter_dsp::{BandParams, Placement, Shape, Slope};
 use nih_plug::prelude::*;
 use nih_plug_egui::EguiState;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 /// Plugin-side mirror of [`Shape`] with stable ids for saved state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Enum)]
@@ -355,6 +356,12 @@ pub struct NeoFilterParams {
     #[persist = "editor-state"]
     pub editor_state: Arc<EguiState>,
 
+    /// Calibration options, band ownership, playback curve and last summary.
+    /// Never contains a "running" flag: a measurement is only ever started by
+    /// an explicit GUI action.
+    #[persist = "calibration"]
+    pub calibration: Arc<Mutex<CalPersist>>,
+
     #[id = "bypass"]
     pub bypass: BoolParam,
 
@@ -374,6 +381,7 @@ impl Default for NeoFilterParams {
     fn default() -> Self {
         Self {
             editor_state: crate::editor::default_state(),
+            calibration: Arc::new(Mutex::new(CalPersist::default())),
             bypass: BoolParam::new("Bypass", false).make_bypass(),
             out_gain: FloatParam::new(
                 "Output Gain",

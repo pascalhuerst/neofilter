@@ -1260,6 +1260,7 @@ dependencies = [
  "assert_no_alloc",
  "atomic_float 1.1.0",
  "crossbeam",
+ "neo-measure",
  "neofilter-dsp",
  "nih_plug",
  "nih_plug_egui",

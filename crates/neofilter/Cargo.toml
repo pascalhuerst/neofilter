@@ -13,6 +13,7 @@ crate-type = ["cdylib", "lib"]
 nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", rev = "de421011f41a6d10fc8c7a6084e4f4dee0143683", features = ["assert_process_allocs"] }
 nih_plug_egui = { git = "https://github.com/robbert-vdh/nih-plug.git", rev = "de421011f41a6d10fc8c7a6084e4f4dee0143683" }
 neofilter-dsp = { path = "../neofilter-dsp" }
+neo-measure = { path = "../neo-measure" }
 realfft = "3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

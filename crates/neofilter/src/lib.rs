@@ -5,6 +5,7 @@
 
 pub mod analyzer;
 pub mod audio;
+pub mod calibration;
 pub mod editor;
 pub mod params;
 pub mod presets;
@@ -20,6 +21,9 @@ pub struct NeoFilter {
     analyzer_in: analyzer::AnalyzerInput,
     audio: audio::AudioPath,
     editor_handles: editor::EditorHandles,
+    /// Realtime half of the calibration; built in `initialize()` (its noise
+    /// filter design is not realtime-safe).
+    cal_tap: Option<calibration::CalTap>,
 }
 
 impl Default for NeoFilter {
@@ -31,6 +35,7 @@ impl Default for NeoFilter {
             analyzer_in,
             audio: audio::AudioPath::default(),
             editor_handles: editor::EditorHandles::new(analyzer_out),
+            cal_tap: None,
         }
     }
 }
@@ -42,7 +47,22 @@ impl Plugin for NeoFilter {
     const EMAIL: &'static str = "";
     const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
+    /// The first layout adds an optional stereo sidechain input: the playback
+    /// return of the cutting loop used by the calibration. A host that does
+    /// not connect it simply sees an unused input; every layout without
+    /// sidechain stays available.
     const AUDIO_IO_LAYOUTS: &'static [AudioIOLayout] = &[
+        AudioIOLayout {
+            main_input_channels: NonZeroU32::new(2),
+            main_output_channels: NonZeroU32::new(2),
+            aux_input_ports: &[new_nonzero_u32(2)],
+            names: PortNames {
+                layout: Some("Stereo with loop return sidechain"),
+                aux_inputs: &["Loop return"],
+                ..PortNames::const_default()
+            },
+            ..AudioIOLayout::const_default()
+        },
         AudioIOLayout {
             main_input_channels: NonZeroU32::new(2),
             main_output_channels: NonZeroU32::new(2),
@@ -78,18 +98,32 @@ impl Plugin for NeoFilter {
         self.audio
             .prepare(sr, buffer_config.max_buffer_size as usize);
         self.analyzer_in.set_sample_rate(buffer_config.sample_rate);
+        let link = self.editor_handles.calibration.link.clone();
+        match self.cal_tap.as_mut() {
+            Some(t) => t.prepare(sr),
+            None => self.cal_tap = Some(calibration::CalTap::new(link, sr)),
+        }
         context.set_latency_samples(0);
         true
     }
 
     fn reset(&mut self) {
         self.audio.reset();
+        if let Some(t) = self.cal_tap.as_mut() {
+            t.reset();
+        }
+    }
+
+    fn deactivate(&mut self) {
+        if let Some(t) = self.cal_tap.as_mut() {
+            t.reset();
+        }
     }
 
     fn process(
         &mut self,
         buffer: &mut Buffer,
-        _aux: &mut AuxiliaryBuffers,
+        aux: &mut AuxiliaryBuffers,
         _context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
         // The wrappers split the buffer at parameter events (sample-accurate
@@ -101,13 +135,30 @@ impl Plugin for NeoFilter {
             out_gain_db: f64::from(self.params.out_gain.value()),
             bypass: self.params.bypass.value(),
         };
+        // Loop return (sidechain), if the host connected it.
+        let ret: (&[f32], &[f32]) = match aux.inputs.first() {
+            Some(b) => {
+                let ch = b.as_slice_immutable();
+                (
+                    ch.first().map_or(&[][..], |c| &**c),
+                    ch.get(1).map_or(&[][..], |c| &**c),
+                )
+            }
+            None => (&[], &[]),
+        };
         match buffer.as_slice() {
             [l, r] => {
+                if let Some(t) = self.cal_tap.as_mut() {
+                    t.process_stereo(l, r, ret.0, ret.1);
+                }
                 self.analyzer_in.push_pre(l, Some(r));
                 self.audio.process_stereo(l, r, &p);
                 self.analyzer_in.push_post(l, Some(r));
             }
             [m] => {
+                if let Some(t) = self.cal_tap.as_mut() {
+                    t.process_mono(m, &[], &[]);
+                }
                 self.analyzer_in.push_pre(m, None);
                 self.audio.process_mono(m, &p);
                 self.analyzer_in.push_post(m, None);

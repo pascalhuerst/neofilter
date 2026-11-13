@@ -39,11 +39,13 @@ pub struct EditorHandles {
     pub analyzer: Arc<Mutex<AnalyzerOutput>>,
     pub analyzer_shared: Arc<AnalyzerShared>,
     pub settings: Arc<EditorSettings>,
+    pub calibration: Arc<crate::calibration::CalShared>,
 }
 
 impl EditorHandles {
     pub fn new(analyzer_output: AnalyzerOutput) -> Self {
         Self {
+            calibration: Arc::new(crate::calibration::CalShared::default()),
             analyzer_shared: analyzer_output.shared(),
             analyzer: Arc::new(Mutex::new(analyzer_output)),
             settings: Arc::new(EditorSettings {
