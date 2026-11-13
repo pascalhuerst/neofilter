@@ -19,3 +19,7 @@ serde_json = "1"
 atomic_float = "1"
 triple_buffer = "8"
 crossbeam = "0.8"
+
+[dev-dependencies]
+# Same source as nih-plug's (debug builds install its aborting allocator).
+assert_no_alloc = { git = "https://github.com/robbert-vdh/rust-assert-no-alloc.git", branch = "feature/nested-permit-forbid" }
