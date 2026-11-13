@@ -1,0 +1,174 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to release (e.g. v0.1.0)"
+        required: true
+        type: string
+
+concurrency:
+  group: release-${{ github.workflow }}-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  LINUX_DEPS: >-
+    libasound2-dev libgl-dev libjack-dev libx11-xcb-dev libxcb1-dev
+    libxcb-dri2-0-dev libxcb-icccm4-dev libxcursor-dev libxkbcommon-dev
+    libxcb-shape0-dev libxcb-xfixes0-dev
+
+jobs:
+  verify:
+    name: Verify tag and run tests
+    runs-on: ubuntu-22.04
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
+      - name: Check tag format and workspace version
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Tag '$TAG' is not of the form vMAJOR.MINOR.PATCH[-suffix]"
+            exit 1
+          fi
+          version=$(awk '
+            /^\[/ { in_section = ($0 == "[workspace.package]") }
+            in_section && /^version[[:space:]]*=/ {
+              gsub(/^[^"]*"|".*$/, ""); print; exit
+            }' Cargo.toml)
+          if [[ -z "$version" ]]; then
+            echo "::error::Could not read [workspace.package] version from Cargo.toml"
+            exit 1
+          fi
+          if [[ "v$version" != "$TAG" ]]; then
+            echo "::error::Tag '$TAG' does not match Cargo.toml version '$version'"
+            exit 1
+          fi
+          echo "Tag $TAG matches Cargo.toml version $version"
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y $LINUX_DEPS
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.99.1"
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace
+
+  build:
+    name: Build (${{ matrix.platform }})
+    needs: verify
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { platform: linux-x86_64, os: ubuntu-22.04 }
+          - { platform: macos-universal, os: macos-latest }
+          - { platform: windows-x86_64, os: windows-latest }
+    runs-on: ${{ matrix.os }}
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+      PLATFORM: ${{ matrix.platform }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y $LINUX_DEPS
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.99.1"
+          targets: ${{ runner.os == 'macOS' && 'x86_64-apple-darwin,aarch64-apple-darwin' || '' }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.platform }}
+      - name: Bundle
+        run: |
+          if [[ "$PLATFORM" == macos-universal ]]; then
+            export MACOSX_DEPLOYMENT_TARGET=11.0
+            cargo xtask bundle-universal -p neofilter --release
+          else
+            cargo xtask bundle -p neofilter --release
+          fi
+      - name: Package
+        run: |
+          set -euo pipefail
+          name="neofilter-${TAG}-${PLATFORM}"
+          mkdir -p "dist/$name"
+          cp -R target/bundled/neofilter.clap target/bundled/neofilter.vst3 "dist/$name/"
+          cp README.md LICENSE "dist/$name/"
+          cd dist
+          case "$PLATFORM" in
+            linux-*)
+              archive="$name.tar.gz"
+              tar -czf "$archive" "$name"
+              sha256sum "$archive" > "$archive.sha256"
+              ;;
+            macos-*)
+              archive="$name.zip"
+              zip -qry "$archive" "$name"
+              shasum -a 256 "$archive" > "$archive.sha256"
+              ;;
+            windows-*)
+              archive="$name.zip"
+              7z a -tzip -bso0 "$archive" "$name"
+              sha256sum "$archive" > "$archive.sha256"
+              ;;
+          esac
+          ls -l
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.platform }}
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*.sha256
+          if-no-files-found: error
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: artifacts
+          merge-multiple: true
+      - name: Create release
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd artifacts
+          cat ./*.sha256 > SHA256SUMS
+          rm ./*.sha256
+          cat SHA256SUMS
+          prerelease=()
+          if [[ "$TAG" == *-* ]]; then
+            prerelease=(--prerelease)
+          fi
+          gh release create "$TAG" --title "NeoFilter $TAG" --generate-notes --verify-tag \
+            "${prerelease[@]}" ./*.tar.gz ./*.zip SHA256SUMS
