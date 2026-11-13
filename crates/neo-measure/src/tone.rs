@@ -268,7 +268,11 @@ mod tests {
             let x: Vec<f64> = tone(fs, f, 48_000, &[]).iter().map(|v| 0.5 * v).collect();
             let a = analyze_tone(&x, &ToneConfig::new(fs)).unwrap();
             worst = worst.max((a.frequency_hz - f).abs());
-            assert!((a.level_dbfs + 6.0206).abs() < 0.005, "{f}: {}", a.level_dbfs);
+            assert!(
+                (a.level_dbfs + 6.0206).abs() < 0.005,
+                "{f}: {}",
+                a.level_dbfs
+            );
             assert!(a.thd_db < -120.0, "{f}: {}", a.thd_db);
         }
         eprintln!("tone frequency worst error {worst:.2e} Hz");
@@ -286,7 +290,10 @@ mod tests {
         let a = analyze_tone(&x, &ToneConfig::new(fs)).unwrap();
         let h2 = a.harmonics.iter().find(|h| h.order == 2).unwrap();
         let h3 = a.harmonics.iter().find(|h| h.order == 3).unwrap();
-        eprintln!("h2 {:.4} h3 {:.4} thd {:.3} dB", h2.rel_db, h3.rel_db, a.thd_db);
+        eprintln!(
+            "h2 {:.4} h3 {:.4} thd {:.3} dB",
+            h2.rel_db, h3.rel_db, a.thd_db
+        );
         assert!((h2.rel_db + 60.0).abs() < 0.05);
         assert!((h3.rel_db + 70.0).abs() < 0.05);
         let want = 10.0 * (1e-6f64 + 1e-7).log10();

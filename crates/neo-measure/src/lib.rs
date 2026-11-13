@@ -30,7 +30,7 @@ pub mod stereo;
 pub mod tone;
 pub mod transfer;
 pub mod util;
-//pub mod weighting;
+pub mod weighting;
 //pub mod wow_flutter;
 
 /// Sample types accepted by the generic processing functions (`f32`, `f64`).

@@ -121,3 +121,101 @@ impl Window {
 pub fn window_sums(w: &[f64]) -> (f64, f64) {
     (w.iter().sum(), w.iter().map(|v| v * v).sum())
 }
+
+/// Solve `a x = b` in place by Gaussian elimination with partial pivoting.
+/// Returns `false` for a singular system.
+pub(crate) fn solve_linear(a: &mut [Vec<f64>], b: &mut [f64]) -> bool {
+    let n = b.len();
+    for c in 0..n {
+        let mut piv = c;
+        for r in c + 1..n {
+            if a[r][c].abs() > a[piv][c].abs() {
+                piv = r;
+            }
+        }
+        if a[piv][c].abs() < 1e-300 {
+            return false;
+        }
+        a.swap(c, piv);
+        b.swap(c, piv);
+        for r in c + 1..n {
+            let f = a[r][c] / a[c][c];
+            for k in c..n {
+                a[r][k] -= f * a[c][k];
+            }
+            b[r] -= f * b[c];
+        }
+    }
+    for c in (0..n).rev() {
+        let mut s = b[c];
+        for k in c + 1..n {
+            s -= a[c][k] * b[k];
+        }
+        b[c] = s / a[c][c];
+    }
+    true
+}
+
+/// Levenberg-Marquardt least squares with a numerical Jacobian. `resid`
+/// maps parameters to a residual vector; returns the final parameters.
+pub(crate) fn levenberg_marquardt(
+    mut th: Vec<f64>,
+    resid: impl Fn(&[f64]) -> Vec<f64>,
+    iterations: usize,
+) -> Vec<f64> {
+    let n = th.len();
+    let cost = |r: &[f64]| r.iter().map(|v| v * v).sum::<f64>();
+    let mut r = resid(&th);
+    let mut c = cost(&r);
+    let mut lam = 1e-3;
+    for _ in 0..iterations {
+        let mut jac = vec![vec![0.0; n]; r.len()];
+        for j in 0..n {
+            let mut t2 = th.clone();
+            let h = 1e-7 * (1.0 + th[j].abs());
+            t2[j] += h;
+            let r2 = resid(&t2);
+            for i in 0..r.len() {
+                jac[i][j] = (r2[i] - r[i]) / h;
+            }
+        }
+        let mut jtj = vec![vec![0.0; n]; n];
+        let mut jtr = vec![0.0; n];
+        for i in 0..r.len() {
+            for a in 0..n {
+                jtr[a] += jac[i][a] * r[i];
+                for b in 0..n {
+                    jtj[a][b] += jac[i][a] * jac[i][b];
+                }
+            }
+        }
+        let mut improved = false;
+        for _ in 0..12 {
+            let mut a = jtj.clone();
+            for d in 0..n {
+                a[d][d] += lam * (jtj[d][d] + 1e-12);
+            }
+            let mut rhs: Vec<f64> = jtr.iter().map(|v| -v).collect();
+            if !solve_linear(&mut a, &mut rhs) {
+                lam *= 10.0;
+                continue;
+            }
+            let t2: Vec<f64> = th.iter().zip(&rhs).map(|(a, b)| a + b).collect();
+            let r2 = resid(&t2);
+            let c2 = cost(&r2);
+            if c2 < c {
+                improved = (c - c2) / c.max(1e-30) > 1e-10;
+                th = t2;
+                r = r2;
+                c = c2;
+                lam = (lam * 0.3).max(1e-12);
+                break;
+            }
+            lam *= 5.0;
+        }
+        if !improved {
+            break;
+        }
+    }
+    th
+}
