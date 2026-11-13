@@ -27,7 +27,7 @@ pub mod levels;
 pub mod loudness;
 pub mod spectrum;
 pub mod stereo;
-//pub mod tone;
+pub mod tone;
 pub mod transfer;
 pub mod util;
 //pub mod weighting;
