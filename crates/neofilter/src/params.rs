@@ -221,18 +221,19 @@ pub fn gain_range() -> FloatRange {
     }
 }
 
-/// Parse a plain number, accepting decimal comma and the Unicode minus sign.
+/// Parse a plain number, accepting decimal comma, the Unicode minus sign and
+/// spaces (also no-break and thin spaces) as digit group separators, as in
+/// "15 484".
 fn parse_number(s: &str) -> Option<f64> {
     let s: String = s
-        .trim()
         .chars()
+        .filter(|c| !c.is_whitespace())
         .map(|c| match c {
             ',' => '.',
             '\u{2212}' => '-',
             c => c,
         })
         .collect();
-    let s = s.trim();
     let v: f64 = s.parse().ok()?;
     v.is_finite().then_some(v)
 }

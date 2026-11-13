@@ -100,6 +100,12 @@ fn freq_parser_table() {
         ("9,729 kHz", 9729.0),
         ("  15484  ", 15484.0),
         ("1 K", 1000.0),
+        ("15 484", 15484.0),
+        ("15 484 Hz", 15484.0),
+        ("15\u{a0}484 Hz", 15484.0),
+        ("15\u{202f}484", 15484.0),
+        ("1 000,5", 1000.5),
+        ("1e3", 1000.0),
     ];
     for (s, want) in cases {
         let got = parse_freq(s).unwrap_or_else(|| panic!("{s}"));
@@ -108,6 +114,10 @@ fn freq_parser_table() {
     assert_eq!(parse_freq("abc"), None);
     assert_eq!(parse_freq(""), None);
     assert_eq!(parse_freq("k"), None);
+    assert_eq!(parse_freq("Hz"), None);
+    assert_eq!(parse_freq("1e999"), None);
+    assert_eq!(parse_freq("NaN"), None);
+    assert_eq!(parse_freq("inf"), None);
 }
 
 #[test]
@@ -144,6 +154,9 @@ fn gain_parser_and_formatter() {
         assert!((parse_db(s).unwrap() - want).abs() < 1e-6, "{s}");
     }
     assert_eq!(parse_db("x"), None);
+    assert_eq!(parse_db(""), None);
+    assert_eq!(parse_db("dB"), None);
+    assert_eq!(parse_db("+"), None);
     // formatting incl. unit, negative zero avoided
     assert_eq!(
         g.normalized_value_to_string(g.preview_normalized(2.58), true),
