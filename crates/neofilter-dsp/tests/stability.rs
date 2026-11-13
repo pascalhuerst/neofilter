@@ -169,3 +169,18 @@ fn total_response_sums_bands_and_skips_inactive() {
         assert!((tot[i] - ta[i] - tb[i]).abs() < 1e-12);
     }
 }
+
+#[test]
+fn frequencies_above_the_limit_are_pinned_not_aliased() {
+    // 30 kHz at 44.1 kHz would alias; the design is pinned at 0.49 fs.
+    let fs = 44100.0;
+    for shape in [Shape::Bell, Shape::HighShelf, Shape::Notch, Shape::LowCut] {
+        let hi = band(shape, 30000.0, 9.0, 3.0, Slope::Db24);
+        let pinned = band(shape, 0.49 * fs, 9.0, 3.0, Slope::Db24);
+        let fr = grid(20.0, 20000.0, 100);
+        let (mut a, mut b) = (vec![0.0; 100], vec![0.0; 100]);
+        band_response_db(&hi, 1.0, fs, &fr, &mut a);
+        band_response_db(&pinned, 1.0, fs, &fr, &mut b);
+        assert_eq!(a, b, "{shape:?}");
+    }
+}

@@ -51,8 +51,7 @@ const PLAN_HI: f64 = 0.5;
 // follow an analog response whose resonances/zeros sit at a large fraction of
 // the sample rate, and Q 10 shelves, 96 dB/oct band passes and wide notches
 // are the extreme corners. The `core` print-out of the grid test shows the
-// everyday domain (Q 1..3, |gain| <= 6 dB, <= 24 dB/oct); see its numbers in
-// the crate docs of `matched`. Do not raise an entry to make a failing test
+// everyday domain (Q 1..3, |gain| <= 6 dB, <= 24 dB/oct). Do not raise an entry to make a failing test
 // pass: find out why the design got worse.
 const TOL: [[(f64, f64); 6]; 9] = [
     // Bell
