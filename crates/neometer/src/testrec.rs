@@ -454,6 +454,37 @@ impl TestRecData {
         self
     }
 
+    /// Copy every *setting* (profile, options, thresholds) from `other` and
+    /// leave the measurements alone. The editor uses this so that a stale
+    /// copy of the state cannot overwrite results the analysis thread stored
+    /// meanwhile.
+    pub fn copy_settings_from(&mut self, other: &TestRecData) {
+        self.profile_kind = other.profile_kind;
+        self.ortofon = other.ortofon.clone();
+        self.custom = other.custom.clone();
+        self.ref_seconds = other.ref_seconds;
+        self.target_dbfs = other.target_dbfs;
+        self.sweep_mod = other.sweep_mod;
+        self.norm = other.norm;
+        self.norm_freq_hz = other.norm_freq_hz;
+        self.sweep_rel_ref_db = other.sweep_rel_ref_db;
+        self.preamp_riaa = other.preamp_riaa;
+        self.riaa_iec = other.riaa_iec;
+        self.min_snr_db = other.min_snr_db;
+        self.range_db = other.range_db;
+        self.smoothing = other.smoothing;
+        self.export_channel = other.export_channel;
+        self.curve_name = other.curve_name.clone();
+        self.wf_seconds = other.wf_seconds;
+        self.wf_channel = other.wf_channel;
+        self.track_seconds = other.track_seconds;
+        self.track_sel = other.track_sel;
+        self.track_auto = other.track_auto;
+        self.track_thd_pct = other.track_thd_pct;
+        self.track_jump_db = other.track_jump_db;
+        self.track_shortfall_db = other.track_shortfall_db;
+    }
+
     /// Store a reference band, replacing the one of the same slot.
     pub fn set_ref_band(&mut self, b: RefBand) {
         self.ref_bands.retain(|x| x.slot != b.slot);
@@ -661,38 +692,60 @@ impl TestRecData {
 
     /// Step 5: the summary as text.
     pub fn summary_text(&self, trims_now: [f64; 2]) -> String {
+        format!(
+            "NeoMeter test record summary\nProfile: {}\n{}{}{}{}",
+            self.profile().name,
+            self.ref_text(trims_now),
+            self.response_text(),
+            self.wf_text(),
+            self.tracking_text()
+        )
+    }
+
+    /// Step 1 results as text.
+    pub fn ref_text(&self, trims_now: [f64; 2]) -> String {
         let p = self.profile();
-        let mut s = format!("NeoMeter test record summary\nProfile: {}\n", p.name);
-        match self.ref_calibration(trims_now) {
-            Some(r) => {
-                s += &format!(
-                    "Reference band {:.0} Hz ({}): L {:.2} dBFS, R {:.2} dBFS, balance L-R {:+.2} dB\n",
-                    p.ref_freq_hz, p.ref_velocity_label(), r.level_dbfs[0], r.level_dbfs[1], r.balance_db
-                );
-                let x = |v: Option<f64>| v.map_or("n/a".to_string(), |v| format!("{v:.1} dB"));
-                s += &format!(
-                    "Separation: L->R {}, R->L {}\n",
-                    x(r.xtalk_l_to_r_db),
-                    x(r.xtalk_r_to_l_db)
-                );
-                s += &format!(
-                    "Tone {:.2} Hz, speed deviation {:+.2} %\n",
-                    r.tone_hz, r.speed_pct
-                );
-                s += &format!(
-                    "Input trims now L {:+.1} dB, R {:+.1} dB; suggested for {:.1} dBFS: L {:+.2} dB, R {:+.2} dB\n",
-                    trims_now[0], trims_now[1], self.target_dbfs, r.suggested_trim_db[0], r.suggested_trim_db[1]
-                );
-                s += &format!(
-                    "Velocity calibration: reference level {:.2} dBFS = 5 cm/s peak lateral (channel velocity of the band {:.3} cm/s peak)\n",
-                    r.reference_level_dbfs, r.channel_velocity_peak_cm_s
-                );
-                for w in &r.warnings {
-                    s += &format!("Warning: {w}\n");
-                }
-            }
-            None => s += "Reference band: not measured\n",
+        let Some(r) = self.ref_calibration(trims_now) else {
+            return "Reference band: not measured\n".into();
+        };
+        let x = |v: Option<f64>| v.map_or("n/a".to_string(), |v| format!("{v:.1} dB"));
+        let mut s = format!(
+            "Reference band {:.0} Hz ({}): L {:.2} dBFS, R {:.2} dBFS, balance L-R {:+.2} dB\n",
+            p.ref_freq_hz,
+            p.ref_velocity_label(),
+            r.level_dbfs[0],
+            r.level_dbfs[1],
+            r.balance_db
+        );
+        s += &format!(
+            "Separation: L->R {}, R->L {}\n",
+            x(r.xtalk_l_to_r_db),
+            x(r.xtalk_r_to_l_db)
+        );
+        s += &format!(
+            "Tone {:.2} Hz, speed deviation {:+.2} %\n",
+            r.tone_hz, r.speed_pct
+        );
+        s += &format!(
+            "Input trims now L {:+.1} dB, R {:+.1} dB; suggested for {:.1} dBFS: L {:+.2} dB, R {:+.2} dB\n",
+            trims_now[0],
+            trims_now[1],
+            self.target_dbfs,
+            r.suggested_trim_db[0],
+            r.suggested_trim_db[1]
+        );
+        s += &format!(
+            "Velocity calibration: reference level {:.2} dBFS = 5 cm/s peak lateral (channel velocity of the band {:.3} cm/s peak)\n",
+            r.reference_level_dbfs, r.channel_velocity_peak_cm_s
+        );
+        for w in &r.warnings {
+            s += &format!("Warning: {w}\n");
         }
+        s
+    }
+
+    /// Step 2 results as text.
+    pub fn response_text(&self) -> String {
         match self.response() {
             Ok(r) => {
                 let f = |o: Option<DeviationStats>| {
@@ -703,8 +756,8 @@ impl TestRecData {
                         )
                     })
                 };
-                s += &format!(
-                    "Response ({}, {}): covered {}\n  full range: {}\n  1-15 kHz: {}\n",
+                format!(
+                    "Response ({}, {}): covered {}\n  full covered range: {}\n  1-15 kHz: {}\n",
                     self.sweep_modulation()
                         .map_or("modulation unknown", |m| m.name()),
                     self.nominal_description(),
@@ -713,30 +766,67 @@ impl TestRecData {
                     )),
                     f(r.stats_all),
                     f(r.stats_1_15k)
-                );
+                )
             }
-            Err(e) => s += &format!("Response: {e}\n"),
+            Err(e) => format!("Response: {e}\n"),
         }
+    }
+
+    /// Step 3 results as text.
+    pub fn wf_text(&self) -> String {
         match &self.wf {
-            Some(w) => {
-                s += &format!(
-                    "Wow & flutter ({:.0} Hz carrier, indicative; standards use 3150 Hz): speed {:+.2} %, unweighted peak {:.3} % rms {:.3} %, weighted peak {:.3} % WRMS {:.3} %\n",
-                    w.carrier_hz, w.speed_pct, w.unweighted_peak_pct, w.unweighted_rms_pct, w.weighted_peak_pct, w.weighted_rms_pct
-                );
-            }
-            None => s += "Wow & flutter: not measured\n",
+            Some(w) => format!(
+                "Wow & flutter ({:.0} Hz carrier, channel {}; indicative, standards use 3150 Hz): speed {:+.2} %, unweighted peak {:.3} % rms {:.3} % 2-sigma {:.3} %, weighted peak {:.3} % WRMS {:.3} % 2-sigma {:.3} %\n",
+                w.carrier_hz,
+                ["L", "R"][w.channel.min(1)],
+                w.speed_pct,
+                w.unweighted_peak_pct,
+                w.unweighted_rms_pct,
+                w.unweighted_2sigma_pct,
+                w.weighted_peak_pct,
+                w.weighted_rms_pct,
+                w.weighted_2sigma_pct
+            ),
+            None => "Wow & flutter: not measured\n".into(),
         }
+    }
+
+    /// Step 4 results as text.
+    pub fn tracking_text(&self) -> String {
         if self.tracking.is_empty() {
-            s += "Tracking: not measured\n";
-        } else {
-            let rep = evaluate_tracking(&self.tracking, self);
+            return "Tracking: not measured\n".into();
+        }
+        let p = self.profile();
+        let rep = evaluate_tracking(&self.tracking, self);
+        let mut s = format!("Tracking ({:.0} Hz, lateral):\n", p.track_freq_hz);
+        for (row, e) in self.tracking.iter().zip(&rep.rows) {
+            let thd = |c: usize| {
+                row.ch[c]
+                    .thd_percent
+                    .map_or("n/a".to_string(), |v| format!("{v:.2} %"))
+            };
             s += &format!(
-                "Tracking ({:.0} Hz): highest amplitude tracked cleanly {}\n",
-                p.track_freq_hz,
-                rep.highest_clean_um
-                    .map_or("none".to_string(), |a| format!("{a:.0} um"))
+                "  {:.0} um ({:.2} cm/s): L {:.2} dBFS THD {}, R {:.2} dBFS THD {}{}{}\n",
+                e.amp_um,
+                e.velocity_cm_s,
+                row.ch[0].level_dbfs,
+                thd(0),
+                row.ch[1].level_dbfs,
+                thd(1),
+                e.expected_step_db
+                    .map_or(String::new(), |v| format!(", expected step {v:+.2} dB")),
+                if e.mistracked {
+                    format!("  MISTRACKING ({})", e.reasons.join("; "))
+                } else {
+                    String::new()
+                }
             );
         }
+        s += &format!(
+            "Highest amplitude tracked cleanly: {}\n",
+            rep.highest_clean_um
+                .map_or("none".to_string(), |a| format!("{a:.0} um"))
+        );
         s
     }
 
@@ -1152,6 +1242,19 @@ mod tests {
             freq_hz: 315.0,
             ch: [tone(315.0, level, true, thd), tone(315.0, level, true, thd)],
         }
+    }
+
+    #[test]
+    fn copy_settings_keeps_measurements() {
+        let mut live = TestRecData::default();
+        live.tracking.push(row(50.0, -20.0, 0.1));
+        let mut edited = TestRecData::default();
+        edited.ref_seconds = 10.0;
+        edited.custom.name = "x".into();
+        live.copy_settings_from(&edited);
+        assert_eq!(live.ref_seconds, 10.0);
+        assert_eq!(live.custom.name, "x");
+        assert_eq!(live.tracking.len(), 1);
     }
 
     #[test]

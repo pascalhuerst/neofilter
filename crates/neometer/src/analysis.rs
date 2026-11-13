@@ -111,8 +111,8 @@ pub enum RecKind {
 pub struct SweepLive {
     /// Centre frequency of every grid cell.
     pub grid_hz: Vec<f64>,
-    /// Covered cells per channel: `(frequency, level dBFS)`.
-    pub cells: [Vec<(f64, f64)>; 2],
+    /// Covered cells per channel: `(grid index, frequency, level dBFS)`.
+    pub cells: [Vec<(u32, f64, f64)>; 2],
     /// Coverage flag per grid cell (channel 0).
     pub coverage: Vec<bool>,
     pub accepted: [u64; 2],
@@ -736,7 +736,7 @@ impl Engine {
             cells: std::array::from_fn(|c| {
                 tr.curve(c)
                     .iter()
-                    .map(|k| (k.freq_hz, k.level_db))
+                    .map(|k| (k.index as u32, k.freq_hz, k.level_db))
                     .collect()
             }),
             coverage: tr.coverage(0),

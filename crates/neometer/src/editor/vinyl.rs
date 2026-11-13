@@ -33,6 +33,14 @@ pub fn show(ui: &mut Ui, st: &mut EditorState, f: &mut Frame, setter: &ParamSett
                 .suffix(" Hz"),
         );
         ui.separator();
+        ui.label("Pre-emphasis");
+        ui.checkbox(&mut f.set.riaa_iec, "IEC").on_hover_text(
+            "IEC 7950 us low-frequency roll-off (the bass boost of the pre-emphasis is limited by a 5 Hz high-pass). \
+             Changing it restarts the pre-emphasis filter.",
+        );
+        ui.checkbox(&mut f.set.riaa_ultrasonic, "ultrasonic pole")
+            .on_hover_text("3.18 us (about 50 kHz) pole in the pre-emphasis, as used by some cutting systems.");
+        ui.separator();
         if ui.button("Reset max").clicked() {
             st.shared.request_reset(crate::shared::reset::VINYL);
         }

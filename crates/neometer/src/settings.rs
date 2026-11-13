@@ -21,6 +21,8 @@ pub enum Page {
     Spectrum,
     Vinyl,
     Test,
+    /// Test-record input calibration.
+    TestRecord,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
