@@ -136,13 +136,19 @@ generalised):
   NaN or unstable coefficients. Frequencies ≥ 0.49*fs are clamped.
 
 Accuracy (as built): the original blanket target (0.1 dB up to 0.4 fs, 0.5 dB
-up to 0.45 fs) was **not** met. The enforced, measured regression tolerances
-per shape and frequency bucket are in
-`crates/neofilter-dsp/tests/accuracy.rs`. In short: bells in the everyday range
-(Q 1 to 3, up to 6 dB gain, up to 24 dB/oct) are within about 0.23 dB up to
-16 kHz at 44.1 kHz; high-Q shelves and cuts, wide notches and 96 dB/oct band
-passes near Nyquist deviate by several dB (up to ~15 dB in the extreme corners).
-See "Future work".
+up to 0.45 fs) was **not** met by the matched design. Bell (all slopes) and
+even-order High Cut bands no longer use it: they use the reference EQ's rule
+identified by measurement (`src/refmatch.rs`, `docs/reference-matching.md`),
+which reproduces 198 measured single-band curves to 0.017 dB worst case
+(Bell 0.006 dB, median 0.0001 dB) and the factory presets' total curves to
+0.016 dB or better; these bands intentionally deviate from the analog
+prototype near Nyquist. The matched design remains for the other shapes (and as
+a per-section fallback); its enforced regression tolerances per shape and
+frequency bucket are in `crates/neofilter-dsp/tests/accuracy.rs` (for
+bells and even-order high cuts only band frequencies up to 0.02 fs are compared
+with the analog prototype there). Matched-design summary: high-Q shelves and
+cuts, wide notches and 96 dB/oct band passes near Nyquist deviate by several dB
+(up to ~15 dB in the extreme corners). See "Future work".
 
 ### Runtime engine
 

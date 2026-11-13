@@ -26,18 +26,27 @@ has been done, treat those two cases as approximate.
 
 ## Accuracy
 
-The digital filters follow the analog prototypes closely in the everyday
-range, but not everywhere. The enforced, measured tolerances are in
+Bell (all slopes) and High Cut (even orders: 12, 24, 36, 48, 72, 96 dB/oct)
+bands use the digital design rule identified from measurements of the
+reference EQ ([docs/reference-matching.md](docs/reference-matching.md)). Measured
+against its impulse responses (198 single-band cases at 44.1 / 48 / 96 kHz,
+reference points above -90 dB): worst deviation 0.017 dB, Bell cases worst
+0.006 dB, median 0.0001 dB. The total curves of the factory presets agree to
+0.016 dB or better between 40 Hz and 20 kHz (0.0009 to 0.016 dB depending on
+preset and sample rate). Tests: `crates/neofilter-dsp/tests/reference_curves.rs`
+and `crates/neofilter/tests/reference_presets.rs`.
+
+All other shapes (shelves, Low Cut, Notch, Band Pass, tilts, odd-order cuts)
+still use the analog-matched design and are checked against the analog
+prototypes; the enforced tolerances are in
 [`crates/neofilter-dsp/tests/accuracy.rs`](crates/neofilter-dsp/tests/accuracy.rs):
 
-- Bells in the everyday range (Q 1 to 3, up to 6 dB gain, up to 24 dB/oct)
-  stay within about 0.23 dB of the analog curve up to 16 kHz at 44.1 kHz.
 - High-Q shelves, cuts, wide notches and 96 dB/oct band passes, and any band
   near Nyquist, deviate from the analog prototype by several dB (up to about
   15 dB in the extreme corners of the grid, close to Nyquist). The editor
   curve shows the actual digital response, so what you see is what you hear.
-- The blanket 0.1 dB / 0.5 dB target of the original plan was **not** met.
-  Improving near-Nyquist matching (joint / free-pole fit) is future work.
+- These shapes have not been compared with the reference EQ yet, so they may
+  differ from it by up to that amount.
 
 ## Features
 

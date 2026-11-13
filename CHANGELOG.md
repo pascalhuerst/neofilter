@@ -33,13 +33,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `neofilter-cli export-ffp` / `import-ffp`: convert presets to and from
   `.ffp` preset files (bands only; 24 bands, Stereo placement).
 
+- Bell (all slopes) and even-order High Cut bands use the digital design rule
+  identified from black-box measurements of the reference EQ: five-point
+  squared-magnitude interpolation per section (`refmatch.rs`). Against 198
+  measured single-band cases the worst deviation is 0.017 dB (Bell 0.006 dB,
+  median 0.0001 dB); the factory presets match the measured total curves to
+  0.016 dB or better. See `docs/reference-matching.md`. Bells and even-order
+  High Cuts therefore deviate from the analog prototype near Nyquist on
+  purpose; `tests/accuracy.rs` compares them with it only for band
+  frequencies up to 0.02 fs.
+
 ### Known limitations
 
-- The matched digital filters do not meet the blanket 0.1 dB / 0.5 dB target
-  of the original plan: bells in the everyday range stay within about 0.23 dB
-  up to 16 kHz at 44.1 kHz, but high-Q shelves/cuts, wide notches and
-  96 dB/oct band passes near Nyquist deviate by several dB. The enforced
-  tolerances are in `crates/neofilter-dsp/tests/accuracy.rs`.
+- Shelves, Low Cut, Notch, Band Pass, tilts and odd-order cuts still use the
+  analog-matched design, which does not meet the blanket 0.1 dB / 0.5 dB
+  target of the original plan: high-Q shelves/cuts, wide notches and
+  96 dB/oct band passes near Nyquist deviate by several dB from the analog
+  prototype, and they have not been compared with the reference EQ. The
+  enforced tolerances are in `crates/neofilter-dsp/tests/accuracy.rs`.
 - While a parameter is automated, the design may switch between fit candidates
   for single steps. In the useful range (Q 0.3 to 20, up to 8 kHz) this
   changes the response by at most about 0.1 dB at one frequency. For a Notch
