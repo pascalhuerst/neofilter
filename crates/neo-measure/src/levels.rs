@@ -586,7 +586,7 @@ mod tests {
         let mut m = PeakMeter::new(1000.0, 0.1, 20.0);
         m.process(&[0.0, 1.0, 0.0]);
         assert_eq!(m.peak(), 1.0);
-        m.process(&vec![0.0f32; 50]);
+        m.process(&[0.0f32; 50]);
         assert_eq!(m.peak(), 1.0); // still held
         m.process(&vec![0.0f32; 1000]); // 1 s of decay at 20 dB/s
         assert!((m.peak_db() + 19.02).abs() < 0.05, "{}", m.peak_db());

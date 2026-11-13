@@ -367,7 +367,7 @@ mod tests {
         let fs = 48_000.0;
         let mut g = PinkNoise::new(fs, -20.0, 5);
         let mut x: Vec<f64> = (0..fs as usize * 10).map(|_| g.next_sample()).collect();
-        x.extend(std::iter::repeat(0.0).take(4000));
+        x.extend(std::iter::repeat_n(0.0, 4000));
         let (mut secs, resp) = system(fs);
         let filtered: Vec<f64> = x
             .iter()

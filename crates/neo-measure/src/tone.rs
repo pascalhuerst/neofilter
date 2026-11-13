@@ -78,7 +78,6 @@ pub struct ToneAnalysis {
 
 struct Prepared {
     xw: Vec<f64>,
-    w: Vec<f64>,
     s1: f64,
     s2: f64,
 }
@@ -87,7 +86,7 @@ fn prepare(x: &[f64], win: Window) -> Prepared {
     let w = win.coefficients(x.len());
     let (s1, s2) = window_sums(&w);
     let xw = x.iter().zip(&w).map(|(a, b)| a * b).collect();
-    Prepared { xw, w, s1, s2 }
+    Prepared { xw, s1, s2 }
 }
 
 /// |sum x_w[i] e^{-j 2 pi f i / fs}|

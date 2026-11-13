@@ -14,7 +14,8 @@
 //!
 //! ```
 //! use neo_measure::delay::{estimate_delay, DelayOptions};
-//! let x: Vec<f64> = (0..4000).map(|i| ((i * i * 7919) % 1000) as f64 - 500.0).collect();
+//! let mut s = 12345u64;
+//! let x: Vec<f64> = (0..4000).map(|_| { s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407); (s >> 40) as f64 / 8388608.0 - 1.0 }).collect();
 //! let mut y = vec![0.0; 100];
 //! y.extend(x.iter().map(|v| -0.5 * v));
 //! let e = estimate_delay(&x, &y, &DelayOptions::new(1000)).unwrap();
@@ -162,14 +163,11 @@ pub fn estimate_delay(
     // main-lobe extent -> guard region
     let pk = at(best).abs();
     let mut ext = 0isize;
-    while ext < 4096 && at(best + ext + 1).abs() > 0.25 * pk && best + ext + 1 <= ny as isize - 1 {
+    while ext < 4096 && at(best + ext + 1).abs() > 0.25 * pk && best + ext < ny as isize - 1 {
         ext += 1;
     }
     let mut ext2 = 0isize;
-    while ext2 < 4096
-        && at(best - ext2 - 1).abs() > 0.25 * pk
-        && best - ext2 - 1 >= -(nx as isize - 1)
-    {
+    while ext2 < 4096 && at(best - ext2 - 1).abs() > 0.25 * pk && best - ext2 > -(nx as isize - 1) {
         ext2 += 1;
     }
     let guard = 2 * ext.max(ext2) + 4;
@@ -253,8 +251,7 @@ mod tests {
                 Box::new(|f| {
                     10f64
                         .powf(20.0 * (f.max(1e-3).log10() / 3.0) / 20.0 / 1.0 * 1.0)
-                        .min(10.0)
-                        .max(0.1)
+                        .clamp(0.1, 10.0)
                 }),
             ),
             (
@@ -262,8 +259,7 @@ mod tests {
                 Box::new(|f| {
                     10f64
                         .powf(-20.0 * (f.max(1e-3).log10() / 3.0) / 20.0)
-                        .min(10.0)
-                        .max(0.1)
+                        .clamp(0.1, 10.0)
                 }),
             ),
             (

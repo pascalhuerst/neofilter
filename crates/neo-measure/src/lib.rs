@@ -20,6 +20,13 @@
 //! | [`delay`], [`transfer`], [`tone`], [`wow_flutter`] | - | all |
 //! | [`weighting`] | filters | noise-level helper |
 
+#![allow(
+    clippy::needless_range_loop,
+    clippy::neg_cmp_op_on_partial_ord,
+    clippy::manual_is_multiple_of,
+    clippy::type_complexity
+)]
+
 pub mod delay;
 pub mod filter;
 pub mod generator;
@@ -31,7 +38,7 @@ pub mod tone;
 pub mod transfer;
 pub mod util;
 pub mod weighting;
-//pub mod wow_flutter;
+pub mod wow_flutter;
 
 /// Sample types accepted by the generic processing functions (`f32`, `f64`).
 pub trait Sample: Copy + Into<f64> {}
