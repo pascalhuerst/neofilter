@@ -53,8 +53,9 @@ Non-finite input samples are replaced by silence in the processed path.
 
 ## Digital design
 
-`dsp::RiaaFilters::design(sample_rate)` (called from `initialize()`, never on
-the audio thread; 0.4 s to 3 s in a release build depending on the rate)
+`neo_measure::riaa::RiaaFilters::design(sample_rate)` (called from `initialize()`,
+never on the audio thread; precomputed tables for the common rates 44.1-384 kHz,
+a bounded-time quick design for other rates)
 fits a minimum-phase biquad cascade to the analytic *de-emphasis* by
 Levenberg-Marquardt on the complex response (log magnitude and phase on a log
 grid, 10 Hz .. 20 kHz, reweighted towards a minimax fit). Each biquad is the
