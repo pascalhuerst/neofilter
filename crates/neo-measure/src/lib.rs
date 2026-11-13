@@ -34,6 +34,7 @@ pub mod generator;
 pub mod levels;
 pub mod loudness;
 pub mod riaa;
+mod riaa_tables;
 pub mod spectrum;
 pub mod stereo;
 pub mod tone;

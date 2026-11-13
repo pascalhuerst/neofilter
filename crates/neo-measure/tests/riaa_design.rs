@@ -367,3 +367,129 @@ fn processing_is_denormal_safe_and_resettable() {
     st.reset();
     assert_eq!(st.process(c, 0.0), 0.0);
 }
+
+// ---------------------------------------------------------------------------
+// Shipped tables and the quick design
+
+/// Worst |mag| (dB) and |phase| (deg) of a family's cascade against the
+/// analytic family curve (no IEC), on the library's 1200-point grid.
+fn family_error(fs: f64, ultrasonic: bool, filters: &RiaaFilters) -> (f64, f64) {
+    let o = Options {
+        iec: false,
+        ultrasonic,
+    };
+    let c = filters.cascade(Mode::DeEmphasis, o);
+    let (mut m, mut p) = (0.0f64, 0.0f64);
+    let hi = 20_000.0f64.min(0.45 * fs);
+    for i in 0..1200 {
+        let f = 20.0 * (hi / 20.0).powf(i as f64 / 1199.0);
+        let r = c
+            .response(f, fs)
+            .div(analog_response(Mode::DeEmphasis, o, f));
+        m = m.max(r.db().abs());
+        p = p.max(r.arg().to_degrees().abs());
+    }
+    (m, p)
+}
+
+#[test]
+fn table_covers_the_common_rates_and_reproduces_its_figures() {
+    assert_eq!(
+        TABLE_RATES,
+        [44_100.0, 48_000.0, 88_200.0, 96_000.0, 176_400.0, 192_000.0, 352_800.0, 384_000.0]
+    );
+    for fs in TABLE_RATES {
+        let f = RiaaFilters::design(fs);
+        assert_eq!(f.source(), DesignSource::Table, "{fs}");
+        for ultrasonic in [false, true] {
+            let fit = table_family(fs, ultrasonic).unwrap();
+            // The stored accuracy figures are those of the cascade built from
+            // the stored parameters (the grid is the optimiser's own). The
+            // assembled filter is renormalised to exactly 0 dB at 1 kHz, which
+            // moves the worst error by up to ~1 % of itself, hence 2e-2.
+            let (m, p) = family_error(fs, ultrasonic, &f);
+            assert!(
+                (m - fit.mag_db).abs() < 1e-6 + 2e-2 * fit.mag_db,
+                "{fs} us={ultrasonic}: mag {m} vs table {}",
+                fit.mag_db
+            );
+            assert!(
+                (p - fit.phase_deg).abs() < 1e-4 + 2e-2 * fit.phase_deg,
+                "{fs} us={ultrasonic}: phase {p} vs table {}",
+                fit.phase_deg
+            );
+            // The magnitude target holds at every table rate.
+            assert!(m <= accuracy_goal(fs).0, "{fs} us={ultrasonic}: {m}");
+        }
+        // pre o de is unity (exact inverse; the IEC pair is not: see module docs)
+        for o in Options::ALL.into_iter().filter(|o| !o.iec) {
+            for hz in [20.0, 100.0, 1000.0, 8000.0, 19_000.0, 0.45 * fs] {
+                let u =
+                    f.response(Mode::PreEmphasis, o, hz)
+                        .mul(f.response(Mode::DeEmphasis, o, hz));
+                assert!((u.re - 1.0).abs() < 1e-9 && u.im.abs() < 1e-9, "{fs} {hz}");
+            }
+        }
+    }
+}
+
+/// The shipped tables are what the optimiser produces (slow: the full
+/// optimiser at all eight rates, 10 s in release, minutes in debug). Run with
+/// `cargo test -p neo-measure --release --test riaa_design -- --ignored`.
+#[test]
+#[ignore = "runs the full optimiser at every table rate"]
+fn table_equals_optimiser_output() {
+    for fs in TABLE_RATES {
+        for ultrasonic in [false, true] {
+            let fresh = optimise_family(fs, ultrasonic);
+            let shipped = table_family(fs, ultrasonic).unwrap();
+            assert_eq!(fresh.params.len(), shipped.params.len(), "{fs}");
+            for (a, b) in fresh.params.iter().zip(&shipped.params) {
+                assert!((a - b).abs() < 1e-9 * (1.0 + b.abs()), "{fs}: {a} vs {b}");
+            }
+            assert!((fresh.mag_db - shipped.mag_db).abs() < 1e-9);
+            assert!((fresh.phase_deg - shipped.phase_deg).abs() < 1e-7);
+        }
+    }
+}
+
+#[test]
+fn quick_design_is_bounded_and_accurate() {
+    // Accuracy: magnitude within the design goal at every rate (the phase
+    // follows the physics limit documented in the README).
+    for fs in [
+        22_050.0, 32_000.0, 44_100.0, 50_000.0, 64_000.0, 128_000.0, 250_000.0, 705_600.0,
+    ] {
+        let t = std::time::Instant::now();
+        let f = RiaaFilters::design_quick(fs);
+        let ms = t.elapsed().as_secs_f64() * 1e3;
+        assert_eq!(f.source(), DesignSource::Quick);
+        for ultrasonic in [false, true] {
+            let (m, _) = family_error(fs, ultrasonic, &f);
+            assert!(m <= accuracy_goal(fs).0, "{fs} us={ultrasonic}: {m} dB");
+        }
+        for mode in [Mode::PreEmphasis, Mode::DeEmphasis] {
+            for o in Options::ALL {
+                assert!(
+                    f.cascade(mode, o).is_stable_min_phase() || (o.iec && mode == Mode::DeEmphasis)
+                );
+            }
+        }
+        // Time bound only meaningful for optimised builds.
+        if !cfg!(debug_assertions) {
+            assert!(ms < 50.0, "{fs}: quick design took {ms} ms");
+        }
+    }
+}
+
+#[test]
+fn quick_design_at_a_table_rate_is_no_worse_than_the_table() {
+    for fs in [44_100.0, 96_000.0, 192_000.0] {
+        let q = RiaaFilters::design_quick(fs);
+        for ultrasonic in [false, true] {
+            let fit = table_family(fs, ultrasonic).unwrap();
+            let (m, _) = family_error(fs, ultrasonic, &q);
+            assert!(m <= fit.mag_db * 1.05 + 1e-4, "{fs}: {m} vs {}", fit.mag_db);
+        }
+    }
+}

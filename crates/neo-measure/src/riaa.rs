@@ -37,6 +37,7 @@
 //! with a floor on the de-emphasis, so the pre-emphasis gain stays bounded);
 //! the per-rate behaviour is measured in the tests and listed in the README.
 
+use crate::riaa_tables as tables;
 use std::f64::consts::PI;
 
 pub const T1: f64 = 3180e-6;
@@ -712,6 +713,8 @@ struct FitResult {
     cascade: Cascade,
     mag_db: f64,
     phase_deg: f64,
+    /// Phase weight of the optimiser pass that produced the result.
+    alpha: f64,
 }
 
 impl FitResult {
@@ -751,6 +754,7 @@ fn fit_design_family(fs: f64, ultrasonic: bool, max_sections: usize) -> (FitResu
             cascade: c,
             mag_db: m,
             phase_deg: ph,
+            alpha: prob.alpha,
         }
     };
     let accept = |r: &FitResult| r.cascade.is_stable_min_phase() && r.mag_db.is_finite();
@@ -860,10 +864,172 @@ pub struct FilterReport {
     pub max_phase_err_deg: f64,
 }
 
+/// Result of fitting one de-emphasis family (with or without the ultrasonic
+/// pole) at one sample rate: the optimiser parameters plus the achieved
+/// accuracy. `params = [ln gain, (ln wz, ln Qz, ln wp, ln Qp) per section]`
+/// (analog section parameters, bilinear-transformed with `k = 2 fs`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct FamilyFit {
+    pub params: Vec<f64>,
+    /// Phase weight of the optimiser pass that produced the fit.
+    pub alpha: f64,
+    /// Worst magnitude error in dB over 20 Hz .. min(20 kHz, 0.45 fs).
+    pub mag_db: f64,
+    /// Worst phase error in degrees over the same band.
+    pub phase_deg: f64,
+}
+
+impl FamilyFit {
+    fn from_result(r: &FitResult) -> Self {
+        Self {
+            params: r.params.clone(),
+            alpha: r.alpha,
+            mag_db: r.mag_db,
+            phase_deg: r.phase_deg,
+        }
+    }
+
+    fn cascade(&self, fs: f64) -> Cascade {
+        params_to_cascade(&self.params, 2.0 * fs)
+    }
+}
+
+/// Full optimiser for one family: 0.1 .. 1.5 s in a release build, many
+/// times that in debug. Not for `initialize()` at an arbitrary rate; use
+/// [`RiaaFilters::design`], which uses the shipped tables or the quick design.
+pub fn optimise_family(sample_rate: f64, ultrasonic: bool) -> FamilyFit {
+    let fs = clamp_rate(sample_rate);
+    FamilyFit::from_result(&fit_design_family(fs, ultrasonic, MAX_FIT_SECTIONS).0)
+}
+
+/// Bounded-time design for any rate: warm start from the shipped table entry
+/// nearest in log frequency, then a short Levenberg-Marquardt refinement
+/// (magnitude-first weighting as in the full optimiser). Never worse than the
+/// warm start; stable and minimum phase by construction.
+pub fn quick_family(sample_rate: f64, ultrasonic: bool) -> FamilyFit {
+    let fs = clamp_rate(sample_rate);
+    let nearest = tables::TABLE
+        .iter()
+        .min_by(|a, b| (a.fs / fs).ln().abs().total_cmp(&(b.fs / fs).ln().abs()))
+        .expect("table is not empty");
+    let fam = &nearest.family[usize::from(ultrasonic)];
+    let goal = accuracy_goal(fs);
+    let mut prob = FitProblem::new(fs, ultrasonic);
+    prob.alpha = fam.alpha;
+    let norm = de_family_raw(ultrasonic, REF_HZ).norm();
+    let target = move |f: f64| de_family_raw(ultrasonic, f).scale(1.0 / norm);
+    let eval = |p: &[f64]| -> FitResult {
+        let c = params_to_cascade(p, 2.0 * fs);
+        let (m, ph) = band_error(&c, fs, &target, 1200);
+        FitResult {
+            params: p.to_vec(),
+            cascade: c,
+            mag_db: m,
+            phase_deg: ph,
+            alpha: fam.alpha,
+        }
+    };
+    let accept = |r: &FitResult| r.cascade.is_stable_min_phase() && r.mag_db.is_finite();
+    let mut start = fam.params.to_vec();
+    prob.clamp(&mut start);
+    let mut best = eval(&start);
+    let mut p = start;
+    for pass in 0..QUICK_PASSES {
+        p = levenberg_marquardt(&prob, &p, QUICK_ITERS);
+        let r = eval(&p);
+        if accept(&r) && (!accept(&best) || r.metric(goal) < best.metric(goal)) {
+            best = r;
+        }
+        if pass + 1 < QUICK_PASSES {
+            reweight_minimax(&mut prob, &p, goal);
+        }
+    }
+    FamilyFit::from_result(&best)
+}
+
+/// LM passes / iterations of [`quick_family`]; sized for < 50 ms in release.
+const QUICK_PASSES: usize = 2;
+const QUICK_ITERS: usize = 30;
+
+fn clamp_rate(sample_rate: f64) -> f64 {
+    if sample_rate.is_finite() {
+        sample_rate.clamp(8_000.0, 768_000.0)
+    } else {
+        48_000.0
+    }
+}
+
+/// One Lawson-style minimax reweighting step.
+fn reweight_minimax(prob: &mut FitProblem, p: &[f64], goal: (f64, f64)) {
+    let c = params_to_cascade(p, prob.k);
+    let errs: Vec<f64> = prob
+        .z1
+        .iter()
+        .zip(&prob.target)
+        .map(|(&z, t)| {
+            let r = eval_cascade_z(&c, z).div(*t);
+            ((20.0 * r.norm().log10()).abs() / goal.0)
+                .max(prob.alpha * r.arg().abs().to_degrees() / goal.1)
+        })
+        .collect();
+    let mean = errs.iter().sum::<f64>() / errs.len() as f64;
+    for (wt, e) in prob.weight.iter_mut().zip(&errs) {
+        *wt *= ((e + 0.05 * mean) / (mean + 1e-30)).sqrt();
+    }
+    let rms = (prob.weight.iter().map(|w| w * w).sum::<f64>() / prob.weight.len() as f64).sqrt();
+    prob.weight.iter_mut().for_each(|w| *w /= rms);
+}
+
+/// How a [`RiaaFilters`] set was obtained.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DesignSource {
+    /// Precomputed optimiser result for one of [`TABLE_RATES`] (microseconds).
+    Table,
+    /// [`quick_family`]: warm start plus short refinement (bounded time).
+    Quick,
+    /// Full optimiser run ([`RiaaFilters::design_full`]).
+    Full,
+}
+
+/// One shipped optimiser result (see `riaa_tables.rs`).
+pub(crate) struct TableFamily {
+    pub params: &'static [f64],
+    pub alpha: f64,
+    pub mag_db: f64,
+    pub phase_deg: f64,
+}
+
+/// Shipped results for one sample rate: `family[0]` plain, `[1]` ultrasonic.
+pub(crate) struct TableEntry {
+    pub fs: f64,
+    pub family: [TableFamily; 2],
+}
+
+/// The shipped fit of one family at a table rate (`None` for other rates).
+pub fn table_family(sample_rate: f64, ultrasonic: bool) -> Option<FamilyFit> {
+    let e = tables::TABLE
+        .iter()
+        .find(|e| (e.fs - sample_rate).abs() < 1e-6)?;
+    let f = &e.family[usize::from(ultrasonic)];
+    Some(FamilyFit {
+        params: f.params.to_vec(),
+        alpha: f.alpha,
+        mag_db: f.mag_db,
+        phase_deg: f.phase_deg,
+    })
+}
+
+/// Sample rates with a shipped precomputed design (see `riaa_tables.rs`,
+/// generated by `cargo run --release -p neo-measure --example riaa_tables`).
+pub const TABLE_RATES: [f64; 8] = [
+    44_100.0, 48_000.0, 88_200.0, 96_000.0, 176_400.0, 192_000.0, 352_800.0, 384_000.0,
+];
+
 /// All filters (both modes, all option combinations) for one sample rate.
 #[derive(Debug, Clone)]
 pub struct RiaaFilters {
     sample_rate: f64,
+    source: DesignSource,
     cascades: [[Cascade; 4]; 2],
     reports: [[FilterReport; 4]; 2],
 }
@@ -876,21 +1042,42 @@ fn mode_index(m: Mode) -> usize {
 }
 
 impl RiaaFilters {
-    /// Design every filter for `sample_rate` (clamped to 8 kHz ..= 768 kHz).
-    /// Allocates and takes from tens of milliseconds to about three seconds
-    /// (release build; depending on the rate); call from `initialize()`.
+    /// Filters for `sample_rate` (clamped to 8 kHz ..= 768 kHz): the shipped
+    /// table entry when the rate is one of [`TABLE_RATES`] (about 10 us),
+    /// otherwise the bounded-time [`quick_family`] design (a few ms to tens
+    /// of ms in release builds). Allocates; call from `initialize()`.
     pub fn design(sample_rate: f64) -> Self {
-        let fs = if sample_rate.is_finite() {
-            sample_rate.clamp(8_000.0, 768_000.0)
-        } else {
-            48_000.0
-        };
+        let fs = clamp_rate(sample_rate);
+        if let (Some(a), Some(b)) = (table_family(fs, false), table_family(fs, true)) {
+            return Self::assemble(fs, &[a, b], DesignSource::Table);
+        }
+        Self::design_quick(fs)
+    }
+
+    /// Always the quick design (see [`quick_family`]).
+    pub fn design_quick(sample_rate: f64) -> Self {
+        let fs = clamp_rate(sample_rate);
+        let fits = [false, true].map(|u| quick_family(fs, u));
+        Self::assemble(fs, &fits, DesignSource::Quick)
+    }
+
+    /// Always the full optimiser (tables are generated with this). Takes
+    /// 0.4 .. 3 s in release builds (see the README for the per-rate numbers).
+    pub fn design_full(sample_rate: f64) -> Self {
+        let fs = clamp_rate(sample_rate);
+        let fits = [false, true].map(|u| optimise_family(fs, u));
+        Self::assemble(fs, &fits, DesignSource::Full)
+    }
+
+    /// Build all eight filters from the two fitted de-emphasis families (index
+    /// 0: plain, 1: ultrasonic pole). The IEC variants add exact first-order
+    /// sections; pre-emphasis is the exact inverse of de-emphasis.
+    pub fn assemble(sample_rate: f64, fits: &[FamilyFit; 2], source: DesignSource) -> Self {
+        let fs = clamp_rate(sample_rate);
         let k = 2.0 * fs;
         let mut cascades = [[Cascade::identity(); 4]; 2];
         for ultrasonic in [false, true] {
-            let fit = fit_design_family(fs, ultrasonic, MAX_FIT_SECTIONS)
-                .0
-                .cascade;
+            let fit = fits[usize::from(ultrasonic)].cascade(fs);
             for iec in [false, true] {
                 let opts = Options { iec, ultrasonic };
                 // De-emphasis: fit (+ exact IEC high-pass).
@@ -932,6 +1119,7 @@ impl RiaaFilters {
         }
         Self {
             sample_rate: fs,
+            source,
             cascades,
             reports,
         }
@@ -939,6 +1127,11 @@ impl RiaaFilters {
 
     pub fn sample_rate(&self) -> f64 {
         self.sample_rate
+    }
+
+    /// Where the design came from.
+    pub fn source(&self) -> DesignSource {
+        self.source
     }
 
     pub fn cascade(&self, mode: Mode, opts: Options) -> &Cascade {
