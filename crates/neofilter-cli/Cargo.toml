@@ -1,0 +1,15 @@
+[package]
+name = "neofilter-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Response export and IR comparison tool for NeoFilter"
+
+[[bin]]
+name = "neofilter-cli"
+path = "src/main.rs"
+
+[dependencies]
+neofilter-dsp = { path = "../neofilter-dsp" }
+clap = { version = "4", features = ["derive"] }
+hound = "3"
