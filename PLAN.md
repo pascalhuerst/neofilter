@@ -1,5 +1,12 @@
 # NeoFilter — implementation plan
 
+> **Status (suite, v0.1 unreleased):** everything in "Scope" below is
+> implemented. The repository has since grown into a suite (NeoFilter, NeoRIAA,
+> NeoMeter, neo-measure); its plan and status are in
+> [docs/PLAN-vinyl-suite.md](docs/PLAN-vinyl-suite.md), and all open items are
+> listed in one place under "Open items and future work" there. Deviations
+> from this document are marked "As built" below.
+
 NeoFilter is a 32-band parametric EQ plugin (CLAP + VST3) written in Rust for
 Linux (Bitwig first), whose band parameters (Shape / Frequency / Gain / Q /
 Slope) use the same conventions as FabFilter Pro-Q 3 so that settings made
@@ -35,8 +42,13 @@ In scope (v0.1):
   pre/post spectrum analyzer, factory preset menu.
 - Factory presets "Friend EQ A" and "Friend EQ B" (tables below).
 - `neofilter-cli`: prints/exports the response curve of a preset and compares
-  it against a measured impulse-response WAV (calibration).
+  it against a measured impulse-response WAV (calibration). As built it also
+  renders WAV files, writes impulse responses, converts `.ffp` files
+  (`export-ffp`, `import-ffp`) and runs the loop calibration offline
+  (`calibrate`).
 - CI + release pipelines for GitHub Actions, README.
+- Added after the first plan (see `docs/PLAN-vinyl-suite.md`): sidechain input
+  and loop calibration, NeoRIAA, NeoMeter, neo-measure.
 
 Out of scope (v0.1, keep the architecture open for them): linear-phase and
 natural-phase modes, dynamic EQ, brickwall slope, EQ match, band solo,
@@ -46,10 +58,13 @@ auto-gain, surround.
 
 ```
 Cargo.toml                 workspace
-crates/neofilter-dsp/      pure DSP library, no plugin deps, heavily tested
-crates/neofilter/          the plugin (nih-plug): params, process, presets, editor
-crates/neofilter-cli/      response export + IR comparison tool
-xtask/                     nih_plug_xtask (cargo xtask bundle neofilter --release)
+crates/neofilter-dsp/      pure DSP library, no plugin deps, heavily tested (+ autofit)
+crates/neofilter/          the plugin (nih-plug): params, process, presets, calibration, editor
+crates/neofilter-cli/      CLI: curves, render, compare, .ffp exchange, calibrate
+crates/neo-measure/        pure measurement library (meters, spectra, RIAA design, ...)
+crates/neoriaa/            RIAA plugin
+crates/neometer/           metering / measurement plugin
+xtask/                     nih_plug_xtask (cargo xtask bundle -p neofilter -p neoriaa -p neometer --release)
 .github/workflows/         ci.yml, release.yml
 ```
 
@@ -102,10 +117,15 @@ plus one real pole if N is odd.
   - 2nd order: `(s^2 + d_k*sqrt(g)*s + g) / (s^2 + d_k*s/sqrt(g) + 1/g)` … scaled so
     that DC gain of the whole cascade is G, HF gain 1 and |H(j w0)| = sqrt(G)
   - 1st order: `(s + sqrt(g)) / (s + 1/sqrt(g))`
-  - High shelf = low shelf of gain 1/G times G. Q control as for cuts (applied
-    to both numerator and denominator damping of the highest-Q section).
-- **Tilt Shelf**: low shelf of gain 1/G cascaded with constant gain sqrt(G)
-  (positive gain lifts highs by G/2 dB and lowers lows by G/2 dB). Order from slope.
+  - High shelf = low shelf of gain 1/G times G. Q control (as built, measured):
+    the highest-Q section's Q is multiplied by `Q_display^0.47`
+    (`SHELF_Q_EXPONENT`); zero and pole frequencies are unchanged. The first
+    plan (Q multiplied directly, as for cuts) did not match the measurements.
+- **Tilt Shelf** (as built, measured convention): `tilt(g) = high_shelf(2 g)
+  - g dB` at the same frequency, slope and Q. A +6 dB tilt runs from -6 dB at
+  low frequencies through 0 dB at the band frequency to +6 dB at high ones.
+  (The first plan, a low shelf of gain 1/G times sqrt(G), ran only -3 to +3 dB
+  for the same setting and was wrong.) Order from slope.
 - **Flat Tilt**: constant dB/octave tilt pivoting at f, approximated by a
   cascade of 1st-order shelves spaced over 10 Hz–30 kHz (≤ 8 sections,
   ripple < 0.1 dB over 20 Hz–20 kHz). Slope ignored.
@@ -137,12 +157,15 @@ generalised):
 
 Accuracy (as built): the original blanket target (0.1 dB up to 0.4 fs, 0.5 dB
 up to 0.45 fs) was **not** met by the matched design. Bell (all slopes) and
-even-order High Cut bands no longer use it: they use the reference EQ's rule
+even-order High Cut bands and default-Q 12 dB/oct shelves no longer use it:
+they use the reference EQ's rule
 identified by measurement (`src/refmatch.rs`, `docs/reference-matching.md`),
 which reproduces 198 measured single-band curves to 0.017 dB worst case
 (Bell 0.006 dB, median 0.0001 dB) and the factory presets' total curves to
-0.016 dB or better; these bands intentionally deviate from the analog
-prototype near Nyquist. The matched design remains for the other shapes (and as
+0.016 dB or better; default-Q 12 dB/oct shelves match 58 measured shelf/tilt cases to
+0.001 dB, and other shelves and tilts match them to 0.01 dB up to 0.1 fs
+(`tests/reference_shelves.rs`). These bands intentionally deviate from the
+analog prototype near Nyquist. The matched design remains for the other shapes (and as
 a per-section fallback); its enforced regression tolerances per shape and
 frequency bucket are in `crates/neofilter-dsp/tests/accuracy.rs` (for
 bells and even-order high cuts only band frequencies up to 0.02 fs are compared
@@ -258,16 +281,22 @@ rounding only.
 
 ## Future work
 
-- Improve near-Nyquist matching (joint / free-pole fit) so that high-Q
-  shelves, cuts, wide notches and high-order band passes meet the original
-  0.1 / 0.5 dB targets.
+- Identify the reference rule for the remaining shapes (Low Cut, Notch, Band
+  Pass, odd-order cuts, Flat Tilt, shelves other than default-Q 12 dB/oct, and
+  shelf/tilt behaviour above 0.1 fs) and near Nyquist; today they use the
+  analog-matched design (see `docs/reference-matching.md`, "Not covered yet").
+- Reference measurements exist for 44.1 / 48 / 96 kHz only.
 - Out-of-scope v0.1 items: linear-phase and natural-phase modes, dynamic EQ,
   brickwall slope, EQ match, band solo, auto-gain, surround.
 
 ## Calibration (black-box, optional but recommended)
 
-The Q scaling and the bandwidth definition of high-slope bells are the two
-conventions that cannot be confirmed from literature. To verify:
+Status: done for Bell, High Cut, shelves and tilt, see
+`docs/reference-matching.md` (the Q scaling, the shelf resonance law and the
+tilt convention turned out to need the measured rules). The workflow below
+is what was used and remains valid for checking further shapes. The Q scaling
+and the bandwidth definition of high-slope bells are conventions that cannot
+be confirmed from literature. To verify:
 
 1. On the reference system, render a unit impulse (or sine sweep) through the
    reference EQ with the preset, at 48 kHz, 32-bit float WAV.
@@ -289,8 +318,9 @@ conventions that cannot be confirmed from literature. To verify:
 - Plugin tests: param ids unique and stable (snapshot list), presets map to
   the tables above exactly, preset apply resets unused bands.
 - `cargo clippy --workspace --all-targets -- -D warnings`, `cargo fmt --check`.
-- Bundle smoke test: `cargo xtask bundle neofilter --release` produces
-  `.clap` and `.vst3`; run `clap-validator` if available.
+- Bundle smoke test: `cargo xtask bundle -p neofilter -p neoriaa -p neometer
+  --release` produces `.clap` and `.vst3` for each; run `clap-validator` if
+  available (it was run on NeoFilter early in development only).
 
 ## Phases (each ends with green tests and a commit)
 
@@ -306,7 +336,9 @@ conventions that cannot be confirmed from literature. To verify:
      analyzer tap; CLI tool.
    - **Editor** — egui GUI.
 4. **Verification** — independent review, full test/clippy/bundle run,
-   install to `~/.clap` / `~/.vst3`, fix findings.
+   install to `~/.clap` / `~/.vst3`, fix findings. (Done for the first
+   plugin; verification in a real host is still open for the suite, see
+   `docs/PLAN-vinyl-suite.md`.)
 
 ## References
 

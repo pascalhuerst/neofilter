@@ -7,8 +7,11 @@ identified from black-box measurements and implemented in
 `crates/neofilter-dsp/src/refmatch.rs`; the Python specification is
 `tools/reference-ab/refmodel.py` (authoritative if the two ever disagree).
 
-Status: **Bell (all slopes) and High Cut (even orders) are covered. Everything
-else still uses the analog-matched design** (`matched.rs`). See "Not covered".
+Status: **Bell (all slopes), High Cut (even orders) and default-Q 12 dB/oct
+shelves are covered by the five-point rule; the shelf resonance law and the
+tilt-shelf convention are corrected to the measurements** (see "Shelves and
+tilt"). Everything else still uses the analog-matched design (`matched.rs`).
+See "Not covered".
 
 ## How the rule was identified
 
@@ -122,11 +125,31 @@ The largest deviations are at the low end. Preset B contains the 13.6 kHz
 contains a Low Cut, which is not covered (below), which probably explains the
 0.0038 dB at 96 kHz; this was not isolated.
 
+## Shelves and tilt
+
+Measured later (58 cases, `crates/neofilter-dsp/tests/fixtures/reference_shelves.json`,
+`tests/reference_shelves.rs`, `tools/reference-ab/shelfmodel.py`):
+
+- Resonance law: the highest-Q Butterworth pair of a Low / High / Tilt Shelf
+  gets section Q = Butterworth Q x displayed Q^0.47
+  (`SHELF_Q_EXPONENT`); zero and pole frequencies are unchanged. Residual in
+  the fixtures at most 0.003 dB.
+- Tilt convention: `tilt(g) = high_shelf(2 g) - g dB` at the same frequency,
+  slope and Q; a +6 dB tilt runs -6 dB to +6 dB.
+- Default-Q (1.0) 12 dB/oct Low / High Shelf sections use the five-point rule
+  (`refmatch::design_shelf_section`): within 0.001 dB over the whole measured
+  range (asserted).
+- Other shelves, 24 dB/oct and tilt shelves: analog prototype exact, digital
+  design is the analog-matched one; within 0.01 dB up to 0.1 fs (asserted),
+  the reference's behaviour near Nyquist is unmeasured. A 12 dB/oct, Q 1 tilt
+  uses the shelf rule but was measured at 96 kHz / 1-2 kHz only.
+
 ## Not covered yet
 
-- Shelves (Low / High Shelf), including their Q convention.
+- Shelves other than default-Q 12 dB/oct above 0.1 fs, and their Q convention
+  outside the measured range (Q 0.5 to 6).
 - Low Cut, Notch, Band Pass.
-- Tilt Shelf (its gain convention) and Flat Tilt.
+- Flat Tilt.
 - Odd-order cuts (6, 18, 30 dB/oct High Cut): first-order sections, rule not
   identified.
 - Band frequencies above about 0.83 Nyquist, where small deviations remain

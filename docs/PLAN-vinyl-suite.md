@@ -1,4 +1,10 @@
-# Vinyl cutting suite — plan
+# Vinyl cutting suite — plan and status
+
+**Status: implemented.** All three parts exist and are tested; what deviated
+from this plan and what is still open is listed under
+[Deviations](#deviations-from-the-plan) and
+[Open items and future work](#open-items-and-future-work) at the end. The text
+below is the original plan, annotated with "As built" where it differs.
 
 Three additions to the NeoFilter repository for calibrating and running a
 vinyl cutting chain:
@@ -20,13 +26,15 @@ program ─► NeoFilter (EQ + calibration) ─► NeoRIAA (pre-emphasis) ─►
 
 ```
 crates/neo-measure/   pure analysis DSP (no plugin deps): meters, spectra, transfer function, delay
-crates/neoriaa/       RIAA plugin (cdylib) — filter design lives in neofilter-dsp::riaa
+crates/neoriaa/       RIAA plugin (cdylib) — filter design lives in neo_measure::riaa (as built)
 crates/neometer/      metering plugin (cdylib, egui)
-crates/neofilter-dsp/ + riaa.rs (RIAA design), + autofit.rs (fit EQ bands to a target curve)
+crates/neofilter-dsp/ + autofit.rs (fit EQ bands to a target curve)
 crates/neofilter/     + sidechain input, calibration engine and GUI panel
 ```
 
-Bundles: `cargo xtask bundle neofilter neoriaa neometer --release`.
+Bundles: `cargo xtask bundle -p neofilter -p neoriaa -p neometer --release`
+(as built: nih_plug_xtask takes either one package name or repeated `-p`; the
+plan's space-separated form is not valid).
 Same rules as the rest of the repo (CLAUDE.md): realtime-safe audio thread,
 f64 internal math, tests with stated tolerances, no product names in code.
 
@@ -49,7 +57,16 @@ Standard RIAA time constants: T1 = 3180 µs, T2 = 318 µs, T3 = 75 µs.
   (so pre∘de is exactly unity). Start from matched poles/zero plus a
   numerator fit; add correction section(s) fitted by least squares on the
   complex response until the targets are met.
-- Accuracy targets (tests against the analytic curve, 20 Hz–20 kHz):
+- As built: the design is `neo_measure::riaa` (shared with NeoMeter), a
+  Levenberg-Marquardt fit of a minimum-phase biquad cascade with
+  precomputed tables for 44.1 to 384 kHz and a bounded-time quick design for
+  other rates; pre-emphasis is the exact inverse of the fitted de-emphasis.
+- Accuracy targets (tests against the analytic curve, 20 Hz–20 kHz). **As
+  built: magnitude meets the targets at every rate (worst about 0.007 dB);
+  phase meets them only from 176.4 kHz** (worst 71 degrees at 44.1 kHz, 61 at
+  48 kHz, 11 to 14 at 88.2 / 96 kHz without the ultrasonic pole). This is a
+  property of stable minimum-phase IIR filters (magnitude fixes phase), not
+  an optimiser shortfall; see `crates/neoriaa/README.md`. Original targets:
   magnitude ≤ 0.01 dB and phase ≤ 0.5° at 88.2 kHz and above; ≤ 0.02 dB and
   ≤ 2° at 44.1/48 kHz. Report the achieved numbers per rate in the README;
   if a target cannot be met at 44.1 kHz, say by how much instead of
@@ -93,6 +110,9 @@ Library (all tested against synthetic signals with known answers):
   - Tone analysis: frequency (interpolated), level, THD and THD+N.
   - Wow & flutter from a 3150 Hz (or 3000 Hz) tone: FM demodulation, speed
     deviation in %, unweighted and DIN/IEC 386 weighted peak (2σ) values.
+    As built: the weighting filter is a fit (peak 4 Hz, -6 dB at 0.8 and
+    20 Hz) because the tabulated mask was not available, and the quasi-peak
+    ballistics are unverified; use for comparison only.
   - Channel separation (crosstalk) per channel with a tone on one channel.
   - Rumble / noise: unweighted and A-weighted levels relative to a reference.
 - **Generator**: sine, log sweep, white and pink noise (seedable), dual-tone,
@@ -105,6 +125,14 @@ levels, velocity/displacement, vertical bass), *Test* (generator + tone, THD,
 wow & flutter, crosstalk, noise). Audio thread only fills lock-free buffers;
 analysis runs on the GUI side or a background thread. Reset buttons, numeric
 readouts with 0.01 dB resolution, selectable reference level.
+
+As built, beyond the plan: input trims (`trim_l`, `trim_r`) and a sixth page,
+**Test record** (input calibration with a test record: reference level,
+balance, crosstalk, playback sweep response with an exportable curve for
+NeoFilter's calibration, speed and wow & flutter, tracking ability; built-in
+Ortofon Test Record profile from public listings, unverified against the
+sleeve), with `neo_measure::{velocity, sweep_track}` behind it. IEC and
+ultrasonic pre-emphasis options on the Vinyl page.
 
 ## 3. Auto-calibration in NeoFilter
 
@@ -142,6 +170,10 @@ readouts with 0.01 dB resolution, selectable reference level.
 - Safety: noise is never started without the user pressing Measure/Auto;
   boost limit always applies; a level warning is shown if the return clips or
   is too low; measurement stops if coherence collapses (stylus lifted).
+- As built: the calibration is driven by the editor's poll (it needs the
+  editor open while measuring; closing it aborts and stops the noise); the
+  noise level is hard-capped at -6 dBFS, and the noise generator never starts
+  from saved state or automation. Details: `docs/calibration.md`.
 - Offline path: `neofilter-cli calibrate --sent sent.wav --return ret.wav
   [--current preset.json]` runs the same delay / transfer-function / fit code
   on recordings and prints the fitted preset JSON — usable for testing and
@@ -161,3 +193,53 @@ low-coherence regions untouched.
    sidechain, panel, CLI).
 4. CI/release workflows for three bundles, README/docs, independent review,
    plugin validation, local install.
+
+## Deviations from the plan
+
+- Bundling several plugins: `cargo xtask bundle -p neofilter -p neoriaa -p
+  neometer --release`, not space-separated names.
+- RIAA design lives in `neo_measure::riaa`, not `neofilter-dsp::riaa`, so
+  NeoRIAA and NeoMeter share it.
+- RIAA phase targets are not met below 176.4 kHz (magnitude is).
+- Wow & flutter weighting is a fit, not the tabulated standard mask.
+- Calibration is driven by the editor poll rather than a background thread
+  inside the plugin; it requires the editor open.
+- NeoMeter gained input trims and the Test record page; NeoFilter's
+  calibration can use the playback curve it exports.
+- Tilt shelf convention and shelf resonance law of NeoFilter were corrected
+  to measured behaviour (see `docs/reference-matching.md`).
+- The plan's "EBU test signals within 0.1 LU" is met by synthesised
+  equivalents, not the official files.
+
+## Open items and future work
+
+Verification
+- Verify all three plugins in a real host (state restore, sidechain routing,
+  automation, editor input). Only `clap-validator` on NeoFilter was run, early
+  on. Re-run it on all three bundles.
+- Review the three editors visually; the painting code was written without
+  being rendered.
+- Run the loop calibration on a real lathe loop, with the cutter's protection
+  active.
+- Check the Ortofon profile against the sleeve; measure a record with a sweep
+  below 800 Hz to verify the playback chain there.
+- Run the official EBU Tech 3341/3342 files.
+- Verify W&F weighting and ballistics against the standard (obtain the
+  tabulated mask) and use a 3150 Hz carrier.
+
+DSP
+- NeoRIAA phase at 44.1 to 96 kHz (needs a different approach, for example an
+  optional linear-phase or all-pass-compensated mode, at the price of
+  latency).
+- Identify the reference rule for the remaining NeoFilter shapes (Low Cut,
+  Notch, Band Pass, odd-order cuts, Flat Tilt, other shelves near Nyquist) and
+  measure at more sample rates.
+- Calibration: phase correction, radius-dependent HF loss, running without the
+  editor open (background driver).
+
+Product
+- Linear-phase and natural-phase modes, dynamic EQ, brickwall slope, EQ match,
+  band solo, auto-gain, surround (NeoFilter, out of scope for v0.1).
+- `.ffp` export of more than 24 bands or non-Stereo placement is not possible
+  with the format as understood; unverified shape and slope codes.
+- Signing and notarisation of macOS builds.
