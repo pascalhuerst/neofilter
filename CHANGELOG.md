@@ -8,7 +8,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- 24-band parametric EQ plugin (CLAP and VST3) with Bell, Low Shelf, Low Cut,
+- 32-band parametric EQ plugin (CLAP and VST3) with Bell, Low Shelf, Low Cut,
   High Shelf, High Cut, Notch, Band Pass, Tilt Shelf and Flat Tilt shapes and
   slopes from 6 to 96 dB/oct, using Pro-Q 3 compatible parameter conventions.
 - Zero-latency minimum-phase processing with analog-matched biquad cascades
@@ -17,7 +17,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   gain scale.
 - egui editor with response curve, draggable nodes, selected-band strip,
   spectrum analyzer, and "Copy preset" / "Paste preset" (JSON via clipboard).
-- Factory presets "Default", "Friend EQ A" and "Friend EQ B".
+- Factory presets "Default", "Friend EQ A", "Friend EQ B" and "Friend EQ A+B
+  (series)" (A bands 1 to 15, then B bands 2, 4, 5, 6, 8, 9, 10, 11, 12 as
+  bands 16 to 24, 8 spare bands): one instance replaces two in series.
+- Band count raised from 24 to 32. Parameter ids for bands 1 to 24 are
+  unchanged and the new bands are `*_25` to `*_32`, so saved state from the
+  24-band plugin loads with bands 25 to 32 at their defaults (unused). Preset
+  JSON accepts band numbers 1 to 32.
 - Audio path with smoothed output gain and a click-free 10 ms soft bypass;
   host buffers of any size are processed without allocation.
 - `neofilter-cli` with `list`, `curve`, `render`, `impulse` and `compare`

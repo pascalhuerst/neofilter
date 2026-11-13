@@ -1,6 +1,6 @@
 # NeoFilter — implementation plan
 
-NeoFilter is a 24-band parametric EQ plugin (CLAP + VST3) written in Rust for
+NeoFilter is a 32-band parametric EQ plugin (CLAP + VST3) written in Rust for
 Linux (Bitwig first), whose band parameters (Shape / Frequency / Gain / Q /
 Slope) use the same conventions as FabFilter Pro-Q 3 so that settings made
 there can be typed in and give the same curve.
@@ -22,7 +22,8 @@ there can be typed in and give the same curve.
 
 In scope (v0.1):
 
-- 24 bands; per band: used, enabled, shape, frequency (10 Hz–30 kHz), gain
+- 32 bands (originally 24; bands 25..32 were appended later, ids of 1..24
+  unchanged); per band: used, enabled, shape, frequency (10 Hz–30 kHz), gain
   (±30 dB), Q (0.025–40), slope, stereo placement (Stereo / Left / Right /
   Mid / Side).
 - Shapes: Bell, Low Shelf, Low Cut, High Shelf, High Cut, Notch, Band Pass,
@@ -146,7 +147,7 @@ See "Future work".
 ### Runtime engine
 
 - `Biquad` TDF-II, f64 state; `BandFilter` = up to 8 sections x 2 channels;
-  `EqEngine` = 24 bands in series.
+  `EqEngine` = 32 bands in series.
 - Stereo placement: Stereo processes L/R; Left/Right only that channel;
   Mid/Side bands process M = (L+R)/2 or S = (L−R)/2 with exact reconstruction.
   Mono buses: placement ignored.
@@ -163,7 +164,7 @@ See "Future work".
 ## Plugin layer
 
 - Params: `#[nested(array, group = "Band")]` band params; nih-plug generates
-  ids `{field}_{n}` (n = 1..24) in group `Band {n}`: `used_n`, `on_n`,
+  ids `{field}_{n}` (n = 1..32) in group `Band {n}`: `used_n`, `on_n`,
   `shape_n`, `freq_n`, `gain_n`, `q_n`, `slope_n`, `place_n`; plus globals
   `out_gain` (dB), `gain_scale` (percent), `bypass`. Ids are frozen once released.
 - Freq: skewed (log) range, Hz/kHz formatting; gain dB; Q 2 decimals.
@@ -220,6 +221,34 @@ See "Future work".
 | 10 | Bell | 6282 | −3.54 | 10.00 | 36 |
 | 11 | Bell | 10011 | +2.64 | 5.95 | 12 |
 | 12 | Bell | 165.7 | +2.06 | 2.97 | 48 |
+
+### Friend EQ A+B (series) — `friend-eq-ab`
+
+Friend EQ A and Friend EQ B were used as two instances in series. Linear
+filters in series commute and concatenate, so one instance holding all bands
+is equivalent. Band 1..15 are A's bands 1..15 (11 disabled); B's used bands
+follow in table order; bands 25..32 are spare.
+
+Band mapping of "Friend EQ A+B (series)" (`friend-eq-ab`):
+
+| Combined band | Source |
+|---|---|
+| 1 to 15 | Friend EQ A bands 1 to 15 (band 11 is used but disabled) |
+| 16 | Friend EQ B band 2 |
+| 17 | Friend EQ B band 4 |
+| 18 | Friend EQ B band 5 |
+| 19 | Friend EQ B band 6 |
+| 20 | Friend EQ B band 8 |
+| 21 | Friend EQ B band 9 |
+| 22 | Friend EQ B band 10 |
+| 23 | Friend EQ B band 11 |
+| 24 | Friend EQ B band 12 |
+| 25 to 32 | unused spare bands |
+
+Built in `presets.rs` from the same A and B tables (no retyped numbers).
+Verified: dB responses add to within 1e-9 at 44.1/48/96 kHz; the f64 engine
+output equals the A-then-B engine chain; the f32 plugin path differs by f32
+rounding only.
 
 ## Future work
 

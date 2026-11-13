@@ -1,6 +1,6 @@
 # NeoFilter
 
-NeoFilter is a 24-band parametric EQ plugin (CLAP and VST3) written in Rust.
+NeoFilter is a 32-band parametric EQ plugin (CLAP and VST3) written in Rust.
 It is developed on Linux (Bitwig first) and also builds for macOS and Windows.
 
 Its band parameters (Shape, Frequency, Gain, Q, Slope) follow the same
@@ -41,7 +41,7 @@ range, but not everywhere. The enforced, measured tolerances are in
 
 ## Features
 
-- 24 bands, each with: used, enabled, shape, frequency (10 Hz to 30 kHz),
+- 32 bands, each with: used, enabled, shape, frequency (10 Hz to 30 kHz),
   gain (±30 dB), Q (0.025 to 40), slope, and stereo placement
   (Stereo / Left / Right / Mid / Side).
 - Shapes: Bell, Low Shelf, Low Cut, High Shelf, High Cut, Notch, Band Pass,
@@ -54,7 +54,7 @@ range, but not everywhere. The enforced, measured tolerances are in
 - Resizable GUI (default 900x560): response curve (sum and per-band),
   draggable band nodes, selected-band strip with text entry for all values,
   pre/post spectrum analyzer, preset menu, "Copy preset" / "Paste preset".
-- Factory presets "Default", "Friend EQ A" and "Friend EQ B".
+- Factory presets "Default", "Friend EQ A", "Friend EQ B" and "Friend EQ A+B (series)".
 - `neofilter-cli`: lists presets, prints/exports a preset's response curve,
   renders WAV files through a preset, writes impulse responses and compares a
   measured impulse-response WAV with the model (see [CLI](#command-line-tool)).
@@ -134,7 +134,7 @@ via your host's parameter editor:
 | Band number | Band N (placement defaults to Stereo) |
 
 Parameter ids (`freq_{n}`, `gain_{n}`, `q_{n}`, `used_{n}`, `on_{n}`,
-`shape_{n}`, `slope_{n}`, `place_{n}` with n = 1..24, plus `out_gain`,
+`shape_{n}`, `slope_{n}`, `place_{n}` with n = 1..32, plus `out_gain`,
 `gain_scale`, `bypass`) are stable, so saved sessions and automation survive
 updates.
 
@@ -159,6 +159,29 @@ zero latency.
 The factory presets "Friend EQ A" (15 bands) and "Friend EQ B" (9 bands) are
 reproductions of two such tables and serve as worked examples; their values
 are listed in [PLAN.md](PLAN.md). Applying a preset resets unused bands.
+
+"Friend EQ A+B (series)" holds all 24 bands of the two presets in one
+instance, with 8 spare bands. EQs in series are linear, so one instance with
+all the bands has the same response as two instances in series (A then B);
+it replaces the two instances. The test suite checks this: the responses add
+up in dB to 1e-9 and the f64 engine output is identical to the two-engine
+chain (the f32 plugin path differs only by f32 rounding, about 1e-7 relative).
+
+Band mapping of "Friend EQ A+B (series)" (`friend-eq-ab`):
+
+| Combined band | Source |
+|---|---|
+| 1 to 15 | Friend EQ A bands 1 to 15 (band 11 is used but disabled) |
+| 16 | Friend EQ B band 2 |
+| 17 | Friend EQ B band 4 |
+| 18 | Friend EQ B band 5 |
+| 19 | Friend EQ B band 6 |
+| 20 | Friend EQ B band 8 |
+| 21 | Friend EQ B band 9 |
+| 22 | Friend EQ B band 10 |
+| 23 | Friend EQ B band 11 |
+| 24 | Friend EQ B band 12 |
+| 25 to 32 | unused spare bands |
 
 Gain scale multiplies the dB gain of every Bell, Shelf and Tilt band, so you
 can dial an overall EQ amount up or down.
