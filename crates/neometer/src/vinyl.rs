@@ -11,7 +11,7 @@
 //! Peaks must not miss a single sample, which a lossy hand-off to an analysis
 //! thread cannot guarantee; the filter is a handful of biquads per channel and
 //! cheap. It is designed at `initialize()` for the host sample rate with
-//! [`riaa::RiaaFilters` (the `neoriaa::dsp` source)] (pre-emphasis, no IEC roll-off, no
+//! [`neo_measure::riaa::RiaaFilters`] (pre-emphasis, no IEC roll-off, no
 //! ultrasonic pole), normalised to 0 dB at 1 kHz.
 //!
 //! # Signals
@@ -37,9 +37,9 @@
 //! value. The numbers are per signal: a mono signal at the reference level
 //! reads 5 cm/s on L, R and lateral and 0 on vertical.
 
-use crate::riaa::{Cascade, CascadeState};
 use neo_measure::filter::{Biquad, BiquadCoeffs};
 use neo_measure::levels::{PeakHold, PeakMeter, RmsMeter, TruePeakMeter};
+use neo_measure::riaa::{Cascade, CascadeState};
 use neo_measure::util::amp_to_db;
 use std::f64::consts::PI;
 

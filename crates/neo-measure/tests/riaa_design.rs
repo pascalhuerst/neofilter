@@ -3,7 +3,7 @@
 //! The digital filters are checked (a) from their coefficients and (b)
 //! through the real processing code via an impulse response and an FFT.
 
-use neoriaa::dsp::*;
+use neo_measure::riaa::*;
 use realfft::RealFftPlanner;
 use std::f64::consts::PI;
 use std::sync::OnceLock;

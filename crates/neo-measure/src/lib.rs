@@ -19,6 +19,7 @@
 //! | [`spectrum`] | - (feed from a ring buffer) | all |
 //! | [`delay`], [`transfer`], [`tone`], [`wow_flutter`] | - | all |
 //! | [`weighting`] | filters | noise-level helper |
+//! | [`riaa`] | - | design (allocating, `initialize()`), cascade processing is RT |
 
 #![allow(
     clippy::needless_range_loop,
@@ -32,6 +33,7 @@ pub mod filter;
 pub mod generator;
 pub mod levels;
 pub mod loudness;
+pub mod riaa;
 pub mod spectrum;
 pub mod stereo;
 pub mod tone;

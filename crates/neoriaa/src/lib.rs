@@ -5,12 +5,11 @@
 #![allow(semicolon_in_expressions_from_non_local_macros)]
 
 pub mod audio;
-pub mod dsp;
 pub mod editor;
 pub mod params;
 
 use audio::{AudioParams, AudioPath, Meters};
-use dsp::RiaaFilters;
+use neo_measure::riaa::RiaaFilters;
 use nih_plug::prelude::*;
 use params::NeoRiaaParams;
 use std::num::NonZeroU32;

@@ -21,22 +21,11 @@ pub mod shared;
 pub mod testgen;
 pub mod vinyl;
 
-/// The RIAA design of `neoriaa::dsp`, compiled from the same source file.
-///
-/// Depending on the `neoriaa` crate itself is impossible: it is a plugin
-/// crate whose `nih_export_vst3!` / `nih_export_clap!` symbols
-/// (`GetPluginFactory`, `clap_entry`) would clash with this plugin's at link
-/// time. `dsp.rs` only uses `std`, so including it by path keeps one source of
-/// truth. (If the design ever moves into a library crate, replace this
-/// with a normal dependency.)
-#[path = "../../neoriaa/src/dsp.rs"]
-pub mod riaa;
-
 use analysis::AnalysisThread;
 use audio::{AudioParams, AudioPath};
+use neo_measure::riaa::{Mode, Options, RiaaFilters};
 use nih_plug::prelude::*;
 use params::NeoMeterParams;
-use riaa::{Mode, Options, RiaaFilters};
 use shared::Shared;
 use std::num::NonZeroU32;
 use std::sync::Arc;

@@ -1,8 +1,8 @@
 //! Shared helpers: cached designs and deterministic test signals.
 #![allow(dead_code)]
 
+use neo_measure::riaa::RiaaFilters;
 use neoriaa::audio::{AudioParams, AudioPath, Meters};
-use neoriaa::dsp::RiaaFilters;
 use std::sync::{Arc, OnceLock};
 
 pub const RATES: [f64; 5] = [44_100.0, 48_000.0, 96_000.0, 192_000.0, 384_000.0];

@@ -17,7 +17,7 @@ fn parameter_ids_defaults_and_ranges() {
     assert_eq!(p.trim.preview_plain(1.0), 12.0);
     assert_eq!(p.mode.preview_plain(0.0), ModeParam::PreEmphasis);
     assert_eq!(p.mode.preview_plain(1.0), ModeParam::DeEmphasis);
-    assert_eq!(p.options(), neoriaa::dsp::Options::default());
+    assert_eq!(p.options(), neo_measure::riaa::Options::default());
 }
 
 #[test]

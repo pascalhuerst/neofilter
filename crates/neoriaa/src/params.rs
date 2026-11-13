@@ -1,7 +1,7 @@
 //! Plugin parameters. The ids are frozen: `mode`, `iec`, `ultrasonic`, `trim`,
 //! `bypass`.
 
-use crate::dsp::{Mode, Options};
+use neo_measure::riaa::{Mode, Options};
 use nih_plug::prelude::*;
 use nih_plug_egui::EguiState;
 use std::sync::Arc;

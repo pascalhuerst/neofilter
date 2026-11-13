@@ -5,8 +5,8 @@ pub mod scale;
 mod view;
 
 use crate::audio::Meters;
-use crate::dsp::RiaaFilters;
 use crate::params::NeoRiaaParams;
+use neo_measure::riaa::RiaaFilters;
 use nih_plug::prelude::*;
 use nih_plug_egui::{create_egui_editor, egui, EguiState};
 use std::sync::{Arc, Mutex};

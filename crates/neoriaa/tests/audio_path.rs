@@ -1,8 +1,8 @@
 //! Host-independent audio path tests.
 mod common;
 use common::*;
+use neo_measure::riaa::{analog_response, Complex, Mode, Options};
 use neoriaa::audio::{AudioParams, AudioPath};
-use neoriaa::dsp::{analog_response, Complex, Mode, Options};
 use realfft::RealFftPlanner;
 use std::sync::atomic::Ordering;
 
@@ -48,7 +48,7 @@ fn bypass_is_bit_transparent() {
 #[test]
 fn pre_then_de_is_unity_at_float_precision() {
     // The exact (1e-9) cascade identity is tested on the f64 filters in
-    // tests/dsp_design.rs; here the f32 interface bounds the error.
+    // neo-measure tests/riaa_design.rs; here the f32 interface bounds the error.
     for fs in [48_000.0, 96_000.0] {
         let (mut pre, _) = path(fs);
         let (mut de_path, _) = path(fs);

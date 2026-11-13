@@ -17,12 +17,12 @@
 //! [`PUBLISH_EVERY`] frames. Nothing here allocates, locks or panics after
 //! [`AudioPath::prepare`].
 
-use crate::riaa::Cascade;
 use crate::ring::Producer;
 use crate::shared::{reset, LevelsReadout, Readouts, Shared, StereoReadout};
 use crate::testgen::{GenEngine, GenSettings};
 use crate::vinyl::Vinyl;
 use neo_measure::levels::{BlockStats, PeakMeter, RmsMeter, TruePeakMeter};
+use neo_measure::riaa::Cascade;
 use neo_measure::stereo::{LowFreqStereo, StereoMeter};
 use neo_measure::util::amp_to_db;
 use std::sync::Arc;

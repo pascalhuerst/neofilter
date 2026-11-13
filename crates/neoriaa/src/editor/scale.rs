@@ -1,7 +1,7 @@
 //! Pure display logic: axis mapping, ticks, number formatting and the cached
 //! response curves. No egui here, so everything is unit-tested.
 
-use crate::dsp::{analog_response, Mode, Options, RiaaFilters};
+use neo_measure::riaa::{analog_response, Mode, Options, RiaaFilters};
 
 /// Lowest displayed frequency.
 pub const F_MIN: f64 = 10.0;

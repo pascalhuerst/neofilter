@@ -1315,6 +1315,7 @@ dependencies = [
  "approx",
  "assert_no_alloc",
  "atomic_float 1.1.0",
+ "neo-measure",
  "nih_plug",
  "nih_plug_egui",
  "proptest",

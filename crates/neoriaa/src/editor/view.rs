@@ -2,8 +2,8 @@
 
 use super::scale::{self, View};
 use super::EditorState;
-use crate::dsp::Mode;
 use crate::params::{ModeParam, NeoRiaaParams};
+use neo_measure::riaa::Mode;
 use nih_plug::prelude::*;
 use nih_plug_egui::egui::{self, pos2, vec2, Align2, Color32, FontId, Rect, Sense, Stroke, Ui};
 use nih_plug_egui::widgets::ParamSlider;

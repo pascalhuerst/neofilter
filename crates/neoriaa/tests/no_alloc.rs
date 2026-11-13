@@ -5,7 +5,7 @@
 mod common;
 use assert_no_alloc::assert_no_alloc;
 use common::*;
-use neoriaa::dsp::{Mode, Options};
+use neo_measure::riaa::{Mode, Options};
 
 #[test]
 fn audio_path_does_not_allocate() {

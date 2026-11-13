@@ -2,9 +2,9 @@
 //! Shared test rig: audio path + synchronous analysis engine, synthetic
 //! signals.
 
+use neo_measure::riaa::{Cascade, Mode, Options, RiaaFilters};
 use neometer::analysis::{Engine, RING_FRAMES};
 use neometer::audio::{AudioParams, AudioPath};
-use neometer::riaa::{Cascade, Mode, Options, RiaaFilters};
 use neometer::ring;
 use neometer::shared::Shared;
 use std::collections::HashMap;

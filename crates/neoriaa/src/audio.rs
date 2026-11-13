@@ -14,8 +14,8 @@
 //!   measured on the samples written to the host buffer.
 //! * Nothing here allocates after construction.
 
-use crate::dsp::{Cascade, CascadeState, Mode, Options, RiaaFilters};
 use atomic_float::AtomicF32;
+use neo_measure::riaa::{Cascade, CascadeState, Mode, Options, RiaaFilters};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
