@@ -34,9 +34,13 @@ fn audio_path_does_not_allocate() {
                 sweep_s: 2.0 + round as f64,
             });
             stereo.params.lf_crossover_hz = 100.0 + 50.0 * round as f64;
+            stereo.params.trim_db = [round as f64 - 3.0, 2.0 - round as f64];
+            mono.params.trim_db = [3.0 - round as f64, 0.0];
             stereo.shared.settings.update(|d| {
                 d.corr_tau_s = [0.1, 0.3, 1.0, 3.0][round % 4];
                 d.hf_corner_hz = 3000.0 + 500.0 * round as f32;
+                d.riaa_iec = round % 2 == 1;
+                d.riaa_ultrasonic = round % 3 == 1;
             });
             if round == 3 {
                 stereo.shared.request_reset(reset::ALL);

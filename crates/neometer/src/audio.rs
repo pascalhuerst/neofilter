@@ -3,7 +3,12 @@
 //! Per block (processed in chunks of [`CHUNK`] frames so no scratch memory
 //! depends on the host block size):
 //!
-//! 1. the **input** frames are pushed to the analysis ring (lossy, never
+//! 0. the **input trims** (`trim_l` / `trim_r`, +-24 dB, ramped linearly over
+//!    [`TRIM_RAMP_S`]) are applied to the buffer in place, so everything
+//!    downstream (ring, meters, pass-through) sees the levelled signal; with
+//!    both trims at 0 dB (and no ramp running) the buffer is not touched and
+//!    the pass-through stays bit-exact,
+//! 1. the (trimmed) input frames are pushed to the analysis ring (lossy, never
 //!    blocks),
 //! 2. the generator (if active) modifies the *output* in place; with the
 //!    generator off the buffer is not touched, so the pass-through is
@@ -17,6 +22,7 @@
 //! [`PUBLISH_EVERY`] frames. Nothing here allocates, locks or panics after
 //! [`AudioPath::prepare`].
 
+use crate::params::{TRIM_MAX_DB, TRIM_MIN_DB};
 use crate::ring::Producer;
 use crate::shared::{reset, LevelsReadout, Readouts, Shared, StereoReadout};
 use crate::testgen::{GenEngine, GenSettings};
@@ -36,17 +42,84 @@ const HOLD_S: f64 = 2.0;
 const DECAY_DB_S: f64 = 20.0;
 const RMS_S: f64 = 0.3;
 const SINE_REF_DB: f64 = 3.010_299_956_639_812;
+/// Duration of the linear gain ramp after a trim change.
+pub const TRIM_RAMP_S: f64 = 0.02;
+
+/// Smoothed linear gain of one channel (no allocation).
+#[derive(Debug, Clone, Copy)]
+struct Trim {
+    gain: f64,
+    target_db: f64,
+    step: f64,
+    left: usize,
+}
+
+impl Trim {
+    const UNITY: Trim = Trim {
+        gain: 1.0,
+        target_db: 0.0,
+        step: 0.0,
+        left: 0,
+    };
+
+    fn set(&mut self, db: f64, fs: f64) {
+        let db = if db.is_finite() {
+            db.clamp(f64::from(TRIM_MIN_DB), f64::from(TRIM_MAX_DB))
+        } else {
+            0.0
+        };
+        if (db - self.target_db).abs() < 1e-9 {
+            return;
+        }
+        self.target_db = db;
+        let target = if db == 0.0 {
+            1.0
+        } else {
+            10f64.powf(db / 20.0)
+        };
+        let n = ((TRIM_RAMP_S * fs) as usize).max(1);
+        self.step = (target - self.gain) / n as f64;
+        self.left = n;
+    }
+
+    fn target_gain(&self) -> f64 {
+        if self.target_db == 0.0 {
+            1.0
+        } else {
+            10f64.powf(self.target_db / 20.0)
+        }
+    }
+
+    fn apply(&mut self, x: &mut [f32]) {
+        if self.left == 0 && self.gain == 1.0 {
+            return;
+        }
+        for v in x {
+            if self.left > 0 {
+                self.gain += self.step;
+                self.left -= 1;
+                if self.left == 0 {
+                    self.gain = self.target_gain();
+                }
+            }
+            *v = (f64::from(*v) * self.gain) as f32;
+        }
+    }
+}
 
 /// Parameters read once per `process` call.
 #[derive(Debug, Clone, Copy)]
 pub struct AudioParams {
     pub lf_crossover_hz: f64,
+    /// Input trims of L and R in dB (0 = untouched).
+    pub trim_db: [f64; 2],
 }
 
 impl Default for AudioParams {
     fn default() -> Self {
         Self {
             lf_crossover_hz: LowFreqStereo::DEFAULT_CROSSOVER_HZ,
+            trim_db: [0.0; 2],
         }
     }
 }
@@ -63,6 +136,9 @@ struct Inner {
     lf_hz: f64,
     tau: f32,
     vinyl: Vinyl,
+    cascades: [Cascade; 4],
+    riaa_index: usize,
+    trim: [Trim; 2],
     gen: GenEngine,
     prod: Producer,
     sl: Vec<f64>,
@@ -96,7 +172,22 @@ impl AudioPath {
     /// `riaa_pre` is the pre-emphasis cascade for `fs`
     /// (`RiaaFilters::design(fs).cascade(Mode::PreEmphasis, Options::default())`).
     pub fn prepare(&mut self, fs: f64, mono: bool, riaa_pre: Cascade, prod: Producer) {
+        self.prepare_with_options(fs, mono, [riaa_pre; 4], prod);
+    }
+
+    /// Like [`AudioPath::prepare`] with the pre-emphasis cascades of all four
+    /// option combinations, in the order of
+    /// [`neo_measure::riaa::Options::ALL`]; the vinyl page selects among them
+    /// ([`crate::settings::SettingsData::riaa_index`]).
+    pub fn prepare_with_options(
+        &mut self,
+        fs: f64,
+        mono: bool,
+        cascades: [Cascade; 4],
+        prod: Producer,
+    ) {
         let st = self.shared.settings.get();
+        let riaa_index = self.shared.settings.riaa_index();
         let tau = self.shared.settings.corr_tau_s();
         let lf_hz = LowFreqStereo::DEFAULT_CROSSOVER_HZ;
         self.inner = Some(Inner {
@@ -110,7 +201,10 @@ impl AudioPath {
             lf: LowFreqStereo::new(fs, lf_hz, f64::from(tau)),
             lf_hz,
             tau,
-            vinyl: Vinyl::new(fs, riaa_pre, f64::from(st.hf_corner_hz), CHUNK),
+            vinyl: Vinyl::new(fs, cascades[riaa_index], f64::from(st.hf_corner_hz), CHUNK),
+            cascades,
+            riaa_index,
+            trim: [Trim::UNITY; 2],
             gen: GenEngine::new(fs),
             prod,
             sl: vec![0.0; CHUNK],
@@ -207,11 +301,26 @@ impl Inner {
         }
         self.vinyl
             .set_corner(f64::from(shared.settings.hf_corner_hz()));
+        let ri = shared.settings.riaa_index();
+        if ri != self.riaa_index {
+            self.riaa_index = ri;
+            self.vinyl.set_cascade(self.cascades[ri]);
+        }
+        let fs = self.fs;
+        for c in 0..2 {
+            self.trim[c].set(p.trim_db[c], fs);
+        }
+        shared.set_applied_trim_db([self.trim[0].target_db, self.trim[1].target_db]);
     }
 
-    fn chunk(&mut self, lc: &mut [f32], rc: Option<&mut [f32]>, gs: &GenSettings) {
+    fn chunk(&mut self, lc: &mut [f32], mut rc: Option<&mut [f32]>, gs: &GenSettings) {
         let m = lc.len();
-        // 1. analysis ring gets the unmodified input
+        // 0. input trims (in place, before everything else)
+        self.trim[0].apply(lc);
+        if let Some(r) = rc.as_deref_mut() {
+            self.trim[1].apply(r);
+        }
+        // 1. analysis ring gets the (trimmed) input
         match rc.as_deref() {
             Some(r) => self.prod.push(lc, r),
             None => self.prod.push(lc, lc),

@@ -9,11 +9,15 @@
 //! | reset requests | GUI -> audio / analysis | atomic bit mask |
 //! | measurement requests | GUI -> analysis | `Mutex<Vec<Command>>` |
 //! | generator settings | GUI -> audio | atomics ([`GenControl`]) |
+//! | applied input trims | audio -> analysis / GUI | atomics ([`Shared::applied_trim_db`]) |
+//! | test-record state and results | GUI <-> analysis | `RwLock` ([`TestRecState`], persisted) |
 
 use crate::analysis::{Command, Snapshot};
 use crate::settings::Settings;
 use crate::testgen::GenControl;
+use crate::testrec::TestRecState;
 use crate::vinyl::SignalReadout;
+use atomic_float::AtomicF64;
 use neo_measure::util::DB_FLOOR;
 use nih_plug_egui::EguiState;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -112,6 +116,10 @@ pub struct Readouts {
 pub struct Shared {
     pub settings: Arc<Settings>,
     pub gen: GenControl,
+    /// Test-record profile, options and measurements (persisted).
+    pub testrec: Arc<TestRecState>,
+    /// Input trims (dB) the audio thread is currently ramping to.
+    applied_trim: [AtomicF64; 2],
     reset_flags: AtomicU32,
     commands: Mutex<Vec<Command>>,
     snapshot: Mutex<Arc<Snapshot>>,
@@ -124,10 +132,20 @@ pub struct Shared {
 
 impl Shared {
     pub fn new(settings: Arc<Settings>, editor_state: Option<Arc<EguiState>>) -> Arc<Self> {
+        Self::with_testrec(settings, Arc::new(TestRecState::default()), editor_state)
+    }
+
+    pub fn with_testrec(
+        settings: Arc<Settings>,
+        testrec: Arc<TestRecState>,
+        editor_state: Option<Arc<EguiState>>,
+    ) -> Arc<Self> {
         let (input, output) = TripleBuffer::new(&Readouts::default()).split();
         Arc::new(Self {
             settings,
             gen: GenControl::new(),
+            testrec,
+            applied_trim: [AtomicF64::new(0.0), AtomicF64::new(0.0)],
             reset_flags: AtomicU32::new(0),
             commands: Mutex::new(Vec::new()),
             snapshot: Mutex::new(Arc::new(Snapshot::default())),
@@ -146,6 +164,22 @@ impl Shared {
     /// The audio-side writer (taken once by [`crate::audio::AudioPath`]).
     pub(crate) fn take_live_writer(&self) -> Option<Input<Readouts>> {
         self.live_in.lock().ok().and_then(|mut g| g.take())
+    }
+
+    /// Audio thread: publish the input trims in effect.
+    pub(crate) fn set_applied_trim_db(&self, db: [f64; 2]) {
+        for (a, v) in self.applied_trim.iter().zip(db) {
+            a.store(v, Ordering::Relaxed);
+        }
+    }
+
+    /// Input trims (dB) the audio path applies (the host parameter values as
+    /// last seen by the audio thread).
+    pub fn applied_trim_db(&self) -> [f64; 2] {
+        [
+            self.applied_trim[0].load(Ordering::Relaxed),
+            self.applied_trim[1].load(Ordering::Relaxed),
+        ]
     }
 
     /// Latest audio-thread readouts.

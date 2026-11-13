@@ -50,13 +50,16 @@ fn parameters_are_frozen_and_few() {
     let p = NeoMeterParams::default();
     let map = p.param_map();
     let ids: Vec<&str> = map.iter().map(|(id, _, _)| id.as_str()).collect();
-    assert_eq!(ids, ["reference_level", "lf_crossover"]);
+    assert_eq!(ids, ["reference_level", "lf_crossover", "trim_l", "trim_r"]);
+    assert_eq!(p.trim_l.value(), 0.0);
+    assert_eq!(p.trim_r.value(), 0.0);
     assert_eq!(p.reference_level.value(), -18.0);
     assert_eq!(p.lf_crossover.value(), 300.0);
     // persisted, not automatable: GUI choices live under these keys
     let keys: Vec<String> = p.serialize_fields().keys().cloned().collect();
     assert!(keys.contains(&"meter-settings".to_string()));
     assert!(keys.contains(&"editor-state".to_string()));
+    assert!(keys.contains(&"test-record".to_string()));
 }
 
 #[test]

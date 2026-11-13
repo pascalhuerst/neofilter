@@ -20,13 +20,16 @@
 use crate::ring::{self, Consumer, Producer};
 use crate::settings::{SettingsData, SpecChannel};
 use crate::shared::{reset, Shared};
+use crate::testrec::{self, CapturedSweep, Mod, TestRecData};
 use neo_measure::loudness::{LoudnessMeter, LoudnessRange};
 use neo_measure::spectrum::{
     resample_log_power, smooth_octave_power, Averaging, Combine, SpectrumAnalyzer, SpectrumConfig,
 };
 use neo_measure::stereo::Goniometer;
+use neo_measure::sweep_track::{PairStats, SweepConfig, SweepTracker};
 use neo_measure::tone::{analyze_tone, channel_separation_db, ToneAnalysis, ToneConfig};
 use neo_measure::util::pow_to_db;
+use neo_measure::velocity::detect_modulation;
 use neo_measure::weighting::{measure_noise, NoiseLevels};
 use neo_measure::wow_flutter::{analyze_wow_flutter, WowFlutterConfig, WowFlutterResult};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -61,11 +64,81 @@ pub enum MeasureKind {
     Reference,
 }
 
+/// Measurements of the test-record page. Their parameters (durations,
+/// profile, thresholds) are read from [`crate::testrec::TestRecState`] when
+/// the command is handled; results are written back there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecCommand {
+    /// Reference band the user plays (left-only, right-only, lateral,
+    /// vertical).
+    Ref(Mod),
+    /// Tracking band with the given index in the profile's amplitude list.
+    Tracking(usize),
+    /// Wow and flutter of the profile's reference tone.
+    WowFlutter,
+    /// Start collecting the sweep response.
+    SweepArm,
+    /// Stop collecting and keep the result.
+    SweepStop,
+    /// Discard the collected / captured sweep.
+    SweepClear,
+    /// Abort a running reference / tracking / W&F capture.
+    Cancel,
+    ClearRef,
+    ClearTracking,
+    ClearWf,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Command {
     Start(MeasureKind),
     Cancel,
     ClearResults,
+    Rec(RecCommand),
+}
+
+/// What a running test-record capture measures.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum RecKind {
+    Ref(Mod),
+    /// Amplitude (um) and index in the profile list.
+    Tracking(f64, usize),
+    WowFlutter,
+}
+
+/// Live view of the sweep tracker while armed.
+#[derive(Debug, Clone, Default)]
+pub struct SweepLive {
+    /// Centre frequency of every grid cell.
+    pub grid_hz: Vec<f64>,
+    /// Covered cells per channel: `(frequency, level dBFS)`.
+    pub cells: [Vec<(f64, f64)>; 2],
+    /// Coverage flag per grid cell (channel 0).
+    pub coverage: Vec<bool>,
+    pub accepted: [u64; 2],
+    pub candidates: [u64; 2],
+    pub pair: Option<PairStats>,
+}
+
+/// Test-record page view of the analysis state.
+#[derive(Debug, Clone, Default)]
+pub struct RecSnapshot {
+    /// Running capture and its progress `0..=1`.
+    pub busy: Option<(RecKindView, f32)>,
+    /// `Some` while the sweep tracker is armed.
+    pub sweep: Option<SweepLive>,
+    /// Last problem, empty if none.
+    pub message: String,
+}
+
+/// [`RecKind`] with a default, for [`RecSnapshot`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RecKindView(pub RecKind);
+
+impl Default for RecKindView {
+    fn default() -> Self {
+        Self(RecKind::WowFlutter)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -189,6 +262,7 @@ pub struct Snapshot {
     /// Running measurement and its progress `0..=1`.
     pub measuring: Option<(MeasureKind, f32)>,
     pub results: Results,
+    pub rec: RecSnapshot,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -202,6 +276,15 @@ struct SpecKey {
 struct SpecState {
     key: SpecKey,
     an: Vec<(Chan, SpectrumAnalyzer)>,
+}
+
+struct RecCapture {
+    kind: RecKind,
+    target: usize,
+    seconds: f64,
+    trims: [f64; 2],
+    l: Vec<f32>,
+    r: Vec<f32>,
 }
 
 struct Capture {
@@ -222,6 +305,10 @@ pub struct Engine {
     spec_data: Option<Arc<SpectrumData>>,
     spec_dirty: bool,
     capture: Option<Capture>,
+    rec_cap: Option<RecCapture>,
+    sweep: Option<SweepTracker>,
+    sweep_trim: [f64; 2],
+    rec_message: String,
     results: Results,
     loud_readout: LoudnessReadout,
     loud_stats_at: Option<Instant>,
@@ -247,6 +334,10 @@ impl Engine {
             spec_data: None,
             spec_dirty: true,
             capture: None,
+            rec_cap: None,
+            sweep: None,
+            sweep_trim: [0.0; 2],
+            rec_message: String::new(),
             results: Results::default(),
             loud_readout: LoudnessReadout::default(),
             loud_stats_at: None,
@@ -265,7 +356,10 @@ impl Engine {
 
     /// Heavy analyses run while the editor is open or a measurement runs.
     pub fn is_active(&self) -> bool {
-        self.shared.ui_active() || self.capture.is_some()
+        self.shared.ui_active()
+            || self.capture.is_some()
+            || self.rec_cap.is_some()
+            || self.sweep.is_some()
     }
 
     fn handle_commands(&mut self, st: &SettingsData) {
@@ -293,6 +387,7 @@ impl Engine {
                 }
                 Command::Cancel => self.capture = None,
                 Command::ClearResults => self.results = Results::default(),
+                Command::Rec(c) => self.handle_rec(c),
             }
         }
         self.cmds = cmds;
@@ -391,6 +486,16 @@ impl Engine {
                 self.spec_dirty = true;
             }
         }
+        if let Some(tr) = self.sweep.as_mut() {
+            tr.push(l, Some(r));
+        }
+        let mut rec_done = false;
+        if let Some(cap) = self.rec_cap.as_mut() {
+            let take = n.min(cap.target - cap.l.len());
+            cap.l.extend_from_slice(&l[..take]);
+            cap.r.extend_from_slice(&r[..take]);
+            rec_done = cap.l.len() >= cap.target;
+        }
         if let Some(cap) = self.capture.as_mut() {
             let take = n.min(cap.target - cap.l.len());
             cap.l.extend_from_slice(&l[..take]);
@@ -399,6 +504,11 @@ impl Engine {
                 if let Some(cap) = self.capture.take() {
                     self.finish_capture(cap, &st);
                 }
+            }
+        }
+        if rec_done {
+            if let Some(cap) = self.rec_cap.take() {
+                self.finish_rec(cap);
             }
         }
         n
@@ -485,6 +595,155 @@ impl Engine {
                 }
             }
         }
+    }
+
+    fn handle_rec(&mut self, c: RecCommand) {
+        let data = self.shared.testrec.get();
+        let start = |kind: RecKind, seconds: f64, fs: f64, trims: [f64; 2]| {
+            let seconds = seconds.clamp(0.5, MAX_CAPTURE_S);
+            let target = (seconds * fs) as usize;
+            RecCapture {
+                kind,
+                target,
+                seconds,
+                trims,
+                l: Vec::with_capacity(target),
+                r: Vec::with_capacity(target),
+            }
+        };
+        let trims = self.shared.applied_trim_db();
+        self.rec_message.clear();
+        match c {
+            RecCommand::Ref(slot) => {
+                self.rec_cap = Some(start(RecKind::Ref(slot), data.ref_seconds, self.fs, trims));
+            }
+            RecCommand::Tracking(i) => {
+                let amps = &data.profile().track_amps_um;
+                if let Some(&a) = amps.get(i) {
+                    self.rec_cap = Some(start(
+                        RecKind::Tracking(a, i),
+                        data.track_seconds,
+                        self.fs,
+                        trims,
+                    ));
+                }
+            }
+            RecCommand::WowFlutter => {
+                self.rec_cap = Some(start(RecKind::WowFlutter, data.wf_seconds, self.fs, trims));
+            }
+            RecCommand::Cancel => self.rec_cap = None,
+            RecCommand::SweepArm => {
+                let p = data.profile();
+                let f_hi = (0.45 * self.fs).min(40_000.0);
+                let mut cfg = SweepConfig::new(self.fs);
+                cfg.f_lo = (0.5 * p.sweep_lo_hz).clamp(20.0, f_hi / 4.0);
+                cfg.f_hi = f_hi;
+                cfg.min_snr_db = data.min_snr_db;
+                self.sweep = SweepTracker::new(cfg, 2);
+                self.sweep_trim = trims;
+                if self.sweep.is_none() {
+                    self.rec_message = "Sweep tracking is not available at this sample rate".into();
+                }
+            }
+            RecCommand::SweepStop => self.finish_sweep(),
+            RecCommand::SweepClear => {
+                self.sweep = None;
+                self.shared.testrec.update(|d| d.sweep = None);
+            }
+            RecCommand::ClearRef => self.shared.testrec.update(|d| d.ref_bands.clear()),
+            RecCommand::ClearTracking => self.shared.testrec.update(|d| d.tracking.clear()),
+            RecCommand::ClearWf => self.shared.testrec.update(|d| d.wf = None),
+        }
+    }
+
+    /// Stop the sweep tracker and store its result in the persisted state.
+    fn finish_sweep(&mut self) {
+        let Some(tr) = self.sweep.take() else {
+            return;
+        };
+        let cells: [Vec<(u32, f64, f64)>; 2] = std::array::from_fn(|c| {
+            tr.curve(c)
+                .iter()
+                .map(|k| (k.index as u32, k.freq_hz, k.level_db))
+                .collect()
+        });
+        if cells[0].is_empty() && cells[1].is_empty() {
+            self.rec_message =
+                "No clean tone was found in the sweep (is the right band playing?)".into();
+            return;
+        }
+        let pair = tr.pair();
+        let detected = pair
+            .filter(|p| p.phase_coherence > 0.5)
+            .and_then(|p| detect_modulation(p.level_diff_db, p.phase_deg))
+            .map(Mod::from_m);
+        let sw = CapturedSweep {
+            cells,
+            trim_db: self.sweep_trim,
+            detected,
+            level_diff_db: pair.map(|p| p.level_diff_db),
+            phase_deg: pair.map(|p| p.phase_deg),
+            pair_blocks: pair.map_or(0, |p| p.blocks),
+        };
+        self.shared.testrec.update(|d| d.sweep = Some(sw));
+    }
+
+    fn finish_rec(&mut self, cap: RecCapture) {
+        let to64 = |x: &[f32]| x.iter().map(|&v| f64::from(v)).collect::<Vec<f64>>();
+        let (l, r) = (to64(&cap.l), to64(&cap.r));
+        let fs = self.fs;
+        let data: TestRecData = self.shared.testrec.get();
+        match cap.kind {
+            RecKind::Ref(slot) => {
+                match testrec::measure_ref_band(&l, &r, fs, slot, cap.seconds, cap.trims) {
+                    Some(b) => self.shared.testrec.update(|d| d.set_ref_band(b)),
+                    None => {
+                        self.rec_message =
+                            "No tone found (silent input, or the wrong channel?)".into()
+                    }
+                }
+            }
+            RecKind::Tracking(amp, _) => match testrec::measure_track_row(&l, &r, fs, amp) {
+                Some(row) => self.shared.testrec.update(|d| {
+                    d.set_track_row(row);
+                    if d.track_auto {
+                        let n = d.profile().track_amps_um.len();
+                        d.track_sel = (d.track_sel + 1).min(n.saturating_sub(1));
+                    }
+                }),
+                None => self.rec_message = "No tone found for the tracking band".into(),
+            },
+            RecKind::WowFlutter => {
+                let ch = data.wf_channel.min(1);
+                let x = if ch == 0 { &l } else { &r };
+                match testrec::measure_wf(x, fs, data.profile().ref_freq_hz, ch) {
+                    Some(w) => self.shared.testrec.update(|d| d.wf = Some(w)),
+                    None => {
+                        self.rec_message =
+                            "Wow & flutter needs a clean carrier tone and a longer capture".into()
+                    }
+                }
+            }
+        }
+    }
+
+    fn sweep_live(&self) -> Option<SweepLive> {
+        let tr = self.sweep.as_ref()?;
+        let n = tr.cell_count();
+        let st = tr.stats();
+        Some(SweepLive {
+            grid_hz: (0..n).map(|i| tr.grid_hz(i)).collect(),
+            cells: std::array::from_fn(|c| {
+                tr.curve(c)
+                    .iter()
+                    .map(|k| (k.freq_hz, k.level_db))
+                    .collect()
+            }),
+            coverage: tr.coverage(0),
+            accepted: st.accepted,
+            candidates: st.candidates,
+            pair: tr.pair(),
+        })
     }
 
     fn build_spectrum(&self, st: &SettingsData) -> Option<SpectrumData> {
@@ -588,6 +847,16 @@ impl Engine {
             spectrum: if ui { self.spec_data.clone() } else { None },
             measuring,
             results: self.results.clone(),
+            rec: RecSnapshot {
+                busy: self.rec_cap.as_ref().map(|c| {
+                    (
+                        RecKindView(c.kind),
+                        c.l.len() as f32 / c.target.max(1) as f32,
+                    )
+                }),
+                sweep: if ui { self.sweep_live() } else { None },
+                message: self.rec_message.clone(),
+            },
         });
     }
 

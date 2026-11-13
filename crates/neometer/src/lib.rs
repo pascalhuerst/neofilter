@@ -6,6 +6,7 @@
 //! * [`analysis`]: background analysis (loudness gating, spectrum, tone, wow
 //!   & flutter, ...), tested without threads via [`analysis::Engine`].
 //! * [`vinyl`]: pre-emphasised cutter-head meters and calibration formulas.
+//! * [`testrec`]: test-record input calibration (state and computations).
 //! * [`editor`]: egui editor.
 
 // Lint fired by nih-plug's vst3 export macro (upstream vst3_com), not our code.
@@ -19,6 +20,7 @@ pub mod ring;
 pub mod settings;
 pub mod shared;
 pub mod testgen;
+pub mod testrec;
 pub mod vinyl;
 
 use analysis::AnalysisThread;
@@ -43,7 +45,11 @@ pub struct NeoMeter {
 impl Default for NeoMeter {
     fn default() -> Self {
         let params = Arc::new(NeoMeterParams::default());
-        let shared = Shared::new(params.settings.clone(), Some(params.editor_state.clone()));
+        let shared = Shared::with_testrec(
+            params.settings.clone(),
+            params.testrec.clone(),
+            Some(params.editor_state.clone()),
+        );
         Self {
             audio: AudioPath::new(shared.clone()),
             params,
@@ -106,10 +112,11 @@ impl Plugin for NeoMeter {
                 d
             }
         };
-        let cascade = *design.cascade(Mode::PreEmphasis, Options::default());
+        let cascades = Options::ALL.map(|o| *design.cascade(Mode::PreEmphasis, o));
         let (thread, producer) = AnalysisThread::spawn(self.shared.clone(), fs, channels);
         self.analysis = Some(thread);
-        self.audio.prepare(fs, channels == 1, cascade, producer);
+        self.audio
+            .prepare_with_options(fs, channels == 1, cascades, producer);
         context.set_latency_samples(0);
         true
     }
@@ -129,6 +136,10 @@ impl Plugin for NeoMeter {
     ) -> ProcessStatus {
         let p = AudioParams {
             lf_crossover_hz: f64::from(self.params.lf_crossover.value()),
+            trim_db: [
+                f64::from(self.params.trim_l.value()),
+                f64::from(self.params.trim_r.value()),
+            ],
         };
         match buffer.as_slice() {
             [l, r] => self.audio.process_stereo(l, r, &p),

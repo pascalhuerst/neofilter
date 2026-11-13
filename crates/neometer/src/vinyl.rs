@@ -267,6 +267,13 @@ impl Vinyl {
         self.ch.iter_mut().for_each(Channel::reset);
     }
 
+    /// Switch the pre-emphasis (e.g. IEC / ultrasonic variants). Restarts the
+    /// filter state; allocation free.
+    pub fn set_cascade(&mut self, cascade: Cascade) {
+        self.cascade = cascade;
+        self.state = [CascadeState::default(); 2];
+    }
+
     pub fn set_corner(&mut self, corner_hz: f64) {
         if (corner_hz - self.corner).abs() > 0.5 {
             self.corner = corner_hz;

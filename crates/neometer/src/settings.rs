@@ -5,11 +5,12 @@
 //! [`crate::testgen`].
 
 use atomic_float::AtomicF32;
+use neo_measure::riaa::Options as RiaaOptions;
 use neo_measure::spectrum::Averaging;
 use neo_measure::util::Window;
 use nih_plug::params::persist::PersistentField;
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, RwLock};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -130,6 +131,10 @@ pub struct SettingsData {
     pub f_hi: f32,
     // vinyl
     pub hf_corner_hz: f32,
+    /// Pre-emphasis for the vinyl meters: IEC 7950 us low-frequency roll-off.
+    pub riaa_iec: bool,
+    /// Pre-emphasis for the vinyl meters: 3.18 us ultrasonic pole.
+    pub riaa_ultrasonic: bool,
     // test
     pub tone_right: bool,
     pub tone_duration_s: f64,
@@ -165,6 +170,8 @@ impl Default for SettingsData {
             f_lo: 20.0,
             f_hi: 20_000.0,
             hf_corner_hz: 5000.0,
+            riaa_iec: false,
+            riaa_ultrasonic: false,
             tone_right: false,
             tone_duration_s: 2.0,
             wf_nominal_hz: 3150.0,
@@ -214,6 +221,18 @@ impl SettingsData {
         self
     }
 
+    /// Index of the pre-emphasis variant in [`RiaaOptions::ALL`].
+    pub fn riaa_index(&self) -> u8 {
+        u8::from(self.riaa_iec) + 2 * u8::from(self.riaa_ultrasonic)
+    }
+
+    pub fn riaa_options(&self) -> RiaaOptions {
+        RiaaOptions {
+            iec: self.riaa_iec,
+            ultrasonic: self.riaa_ultrasonic,
+        }
+    }
+
     pub fn averaging_mode(&self) -> Averaging {
         match self.averaging {
             AvgMode::Off => Averaging::None,
@@ -228,6 +247,7 @@ pub struct Settings {
     data: RwLock<SettingsData>,
     corr_tau_s: AtomicF32,
     hf_corner_hz: AtomicF32,
+    riaa_index: AtomicU8,
 }
 
 impl Default for Settings {
@@ -236,6 +256,7 @@ impl Default for Settings {
         Self {
             corr_tau_s: AtomicF32::new(d.corr_tau_s),
             hf_corner_hz: AtomicF32::new(d.hf_corner_hz),
+            riaa_index: AtomicU8::new(0),
             data: RwLock::new(d),
         }
     }
@@ -253,6 +274,7 @@ impl Settings {
         }
         self.corr_tau_s.store(new.corr_tau_s, Ordering::Relaxed);
         self.hf_corner_hz.store(new.hf_corner_hz, Ordering::Relaxed);
+        self.riaa_index.store(new.riaa_index(), Ordering::Relaxed);
     }
 
     /// Modify the settings (GUI thread).
@@ -265,6 +287,12 @@ impl Settings {
     /// Audio thread: correlation integration time (seconds).
     pub fn corr_tau_s(&self) -> f32 {
         self.corr_tau_s.load(Ordering::Relaxed)
+    }
+
+    /// Audio thread: index into [`RiaaOptions::ALL`] of the pre-emphasis
+    /// variant of the vinyl meters.
+    pub fn riaa_index(&self) -> usize {
+        usize::from(self.riaa_index.load(Ordering::Relaxed)).min(3)
     }
 
     /// Audio thread: lower corner of the vinyl HF band (Hz).
@@ -338,5 +366,20 @@ mod tests {
         });
         assert_eq!(s.corr_tau_s(), 1.0);
         assert_eq!(s.hf_corner_hz(), 7000.0);
+        assert_eq!(s.riaa_index(), 0);
+        s.update(|d| {
+            d.riaa_iec = true;
+            d.riaa_ultrasonic = true;
+        });
+        assert_eq!(s.riaa_index(), 3);
+        for (i, o) in RiaaOptions::ALL.iter().enumerate() {
+            let d = SettingsData {
+                riaa_iec: o.iec,
+                riaa_ultrasonic: o.ultrasonic,
+                ..SettingsData::default()
+            };
+            assert_eq!(usize::from(d.riaa_index()), i);
+            assert_eq!(d.riaa_options(), *o);
+        }
     }
 }
