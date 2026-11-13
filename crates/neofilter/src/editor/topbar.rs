@@ -16,7 +16,7 @@ use std::sync::atomic::Ordering;
 /// `Event::Paste`), while other backends emit `Event::Paste`. Typed characters
 /// also arrive as `Event::Text`, so those only count when they look like a
 /// preset (JSON object).
-fn pasted_text(events: &[Event]) -> Option<String> {
+pub(super) fn pasted_text(events: &[Event]) -> Option<String> {
     events.iter().find_map(|e| match e {
         Event::Paste(s) => Some(s.clone()),
         Event::Text(s) if s.trim_start().starts_with('{') => Some(s.clone()),
@@ -124,6 +124,24 @@ pub fn show(ui: &mut Ui, state: &mut EditorState, setter: &ParamSetter) {
         let mut bypass = params.bypass.value();
         if ui.checkbox(&mut bypass, "Bypass").changed() {
             put(setter, &params.bypass, bypass);
+        }
+
+        ui.separator();
+        let open = state.cal_open;
+        if ui
+            .selectable_label(open, "Calibrate")
+            .on_hover_text("Measure the playback loop and fit calibration bands")
+            .clicked()
+        {
+            state.cal_open = !open;
+        }
+        if super::calib::noise_on(state) {
+            ui.label(
+                egui::RichText::new(" NOISE ON ")
+                    .strong()
+                    .color(egui::Color32::WHITE)
+                    .background_color(egui::Color32::from_rgb(200, 30, 30)),
+            );
         }
 
         ui.separator();

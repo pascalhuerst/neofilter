@@ -2,6 +2,8 @@
 //! verified by running in a host; the pure logic lives in `scale`, `curves` and
 //! `analyzer` and is unit-tested.
 
+mod calib;
+mod calib_view;
 mod curves;
 mod display;
 mod params_io;
@@ -85,6 +87,8 @@ pub(crate) struct EditorState {
     pub preset_name: String,
     pub status: String,
     pub paste_armed: bool,
+    pub cal_open: bool,
+    pub cal: calib::CalUi,
 }
 
 /// Create the editor.
@@ -105,6 +109,8 @@ pub fn create(params: Arc<NeoFilterParams>, handles: EditorHandles) -> Option<Bo
         preset_name: String::new(),
         status: String::new(),
         paste_armed: false,
+        cal_open: false,
+        cal: calib::CalUi::default(),
     };
     create_egui_editor(
         egui_state.clone(),
@@ -117,8 +123,13 @@ pub fn create(params: Arc<NeoFilterParams>, handles: EditorHandles) -> Option<Bo
             ResizableWindow::new("neofilter-window")
                 .min_size(egui::vec2(560.0, 380.0))
                 .show(ctx, egui_state.as_ref(), |ui| {
+                    calib::poll(state, setter);
                     topbar::show(ui, state, setter);
                     ui.add_space(2.0);
+                    if state.cal_open {
+                        calib::show(ui, state, setter);
+                        ui.add_space(2.0);
+                    }
                     let rest = ui.available_rect_before_wrap();
                     let strip_h = 62.0;
                     let plot = egui::Rect::from_min_max(

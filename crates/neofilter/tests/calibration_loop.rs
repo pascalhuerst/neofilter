@@ -648,8 +648,10 @@ fn stop_mid_measurement_changes_nothing() {
     persist.settings = settings(8.0);
     let mut s = new_session(&rig);
     s.start_auto(&persist, &rig.env()).unwrap();
-    rig.run(48_000 * 3);
-    s.poll(&mut persist, &rig.env());
+    for _ in 0..30 {
+        rig.run(4800);
+        s.poll(&mut persist, &rig.env());
+    }
     assert!(rig.link.noise_active() && s.phase() == Phase::Measuring);
     s.stop();
     rig.run(48_000);
@@ -716,4 +718,25 @@ fn polarity_inversion_and_return_gain_are_harmless() {
         .map(|i| (m.mag_db[i] - (t[i] - 0.0)).abs())
         .fold(0.0, f64::max);
     assert!(worst < 0.25, "{worst}");
+}
+
+#[test]
+fn nobody_polling_stops_the_noise() {
+    // editor closed or stalled: the ring is not drained
+    let setup = Setup::new(48_000.0, 0.4);
+    let mut rig = setup.rig();
+    let before = rig.bands;
+    let mut persist = CalPersist::default();
+    persist.settings = settings(8.0);
+    let mut s = new_session(&rig);
+    s.start_auto(&persist, &rig.env()).unwrap();
+    rig.run(48_000 * 4);
+    assert!(!rig.link.noise_active(), "noise must stop by itself");
+    s.poll(&mut persist, &rig.env());
+    assert!(
+        matches!(s.error(), Some(CalError::CaptureOverrun)),
+        "{:?}",
+        s.error()
+    );
+    assert_eq!(rig.bands, before);
 }

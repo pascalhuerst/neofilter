@@ -104,6 +104,8 @@ pub struct Session {
     error: Option<CalError>,
     settle_until: u64,
     stop_requested: bool,
+    /// The measurement predates the last apply/clear: kept for display only.
+    stale: bool,
 }
 
 impl Session {
@@ -124,6 +126,7 @@ impl Session {
             error: None,
             settle_until: 0,
             stop_requested: false,
+            stale: false,
         }
     }
 
@@ -156,6 +159,14 @@ impl Session {
     }
     pub fn plan(&self) -> Option<&FitPlan> {
         self.plan.as_ref()
+    }
+    /// A measurement exists that a fit may be computed from.
+    pub fn can_fit(&self) -> bool {
+        self.measurement.is_some() && !self.stale
+    }
+    /// A fit exists that may be applied.
+    pub fn can_apply(&self) -> bool {
+        self.plan.is_some()
     }
     pub fn history(&self) -> &[IterationRecord] {
         &self.history
@@ -235,6 +246,7 @@ impl Session {
         self.measurement = None;
         self.plan = None;
         self.error = None;
+        self.stale = false;
         self.stop_requested = false;
         self.run = Some(Run {
             next_probe: ((SKIP_S + PROBE_WINDOW_S + 0.5) * fs) as usize,
@@ -256,6 +268,9 @@ impl Session {
     pub fn fit(&mut self, p: &CalPersist, env: &Env) -> Result<(), String> {
         if self.busy() {
             return Err("busy".into());
+        }
+        if self.stale {
+            return Err("the EQ changed since the measurement: measure again".into());
         }
         let m = self
             .measurement
@@ -337,7 +352,7 @@ impl Session {
         }
         // The fit belongs to the old loop: it must not be applied twice.
         self.plan = None;
-        self.measurement = None;
+        self.stale = true;
         Ok(out)
     }
 
@@ -356,7 +371,7 @@ impl Session {
         }
         p.band_mask = 0;
         self.plan = None;
-        self.measurement = None;
+        self.stale = true;
         self.status = "Calibration bands cleared".into();
         out
     }

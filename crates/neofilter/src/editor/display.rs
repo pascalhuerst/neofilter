@@ -222,6 +222,10 @@ pub fn show(ui: &mut Ui, state: &mut EditorState, setter: &ParamSetter, rect: Re
         Stroke::new(2.5_f32, Color32::from_rgb(255, 214, 90)),
     ));
 
+    if state.cal_open {
+        super::calib::draw_overlay(ui, state, &view);
+    }
+
     // Interaction.
     let nodes = scale::nodes(&view, &snap, gs);
     let hover = ui.ctx().pointer_hover_pos();

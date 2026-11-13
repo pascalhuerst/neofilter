@@ -21,7 +21,8 @@ use neo_measure::generator::{Generator, PinkNoise, WhiteNoise};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering::*};
 use std::sync::Arc;
 
-/// Capacity of the capture ring in frames (about 5.5 s at 48 kHz).
+/// Capacity of the capture ring in frames (about 5.5 s at 48 kHz). A
+/// measurement is aborted when more than half of it is undrained.
 pub const RING_FRAMES: usize = 1 << 18;
 /// Fade time of the noise at start and stop.
 pub const FADE_S: f64 = 0.02;
@@ -290,7 +291,9 @@ impl CalTap {
             self.finish();
             return;
         }
-        if self.link.ring.push(frame).is_err() {
+        // Nobody drains the ring (editor closed or stalled): stop the noise
+        // after half the ring instead of letting it run on.
+        if self.link.ring.len() >= RING_FRAMES / 2 || self.link.ring.push(frame).is_err() {
             self.link.overrun.store(true, Release);
             self.finish();
             return;
