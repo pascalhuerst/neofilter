@@ -46,7 +46,7 @@ pub struct FitPlan {
     /// `target - current`: the correction asked for.
     pub correction_db: Vec<f64>,
     pub fitted_cal_db: Vec<f64>,
-    /// Predicted `D` after applying the fit: `D - (fitted - current)`.
+    /// Predicted `D` after applying the fit: `D + (fitted - current)`.
     pub predicted_db: Vec<f64>,
     pub weights: Vec<f64>,
     pub bands: Vec<BandParams>,
@@ -290,7 +290,7 @@ pub fn plan_fit(
     };
     let fit = fit_bands(&pts, Some(&w), m.sample_rate, &opts);
     let fitted = bands_response_db(&fit.bands, gain_scale, m.sample_rate, f);
-    let predicted: Vec<f64> = (0..n).map(|i| dev[i] - (fitted[i] - current[i])).collect();
+    let predicted: Vec<f64> = (0..n).map(|i| dev[i] + (fitted[i] - current[i])).collect();
     let (rms_dev, max_dev) = deviation_stats(f, &dev, &m.coherence, s);
     let (rms_pred, max_pred) = deviation_stats(f, &predicted, &m.coherence, s);
     let mut warnings = Vec::new();

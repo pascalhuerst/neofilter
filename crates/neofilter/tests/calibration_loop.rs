@@ -367,6 +367,31 @@ fn manual_bands_are_untouched_and_convergence_holds() {
     assert_eq!(s2.iterations(), 0);
 }
 
+#[test]
+fn predicted_residual_matches_the_next_measurement() {
+    let setup = Setup::new(48_000.0, 0.37);
+    let mut rig = setup.rig();
+    let mut persist = CalPersist::default();
+    persist.settings = settings(8.0);
+    let mut s = new_session(&rig);
+    s.start_measure(&persist, &rig.env()).unwrap();
+    rig.run_session(&mut s, &mut persist, 60.0);
+    s.fit(&persist, &rig.env()).unwrap();
+    rig.run_session(&mut s, &mut persist, 20.0);
+    let plan = s.plan().unwrap().clone();
+    assert!(plan.rms_dev_db > 1.0);
+    assert!(plan.rms_pred_db < 0.3, "predicted {}", plan.rms_pred_db);
+    rig.bands = s.apply(&mut persist, &rig.env()).unwrap();
+    let m = measure(&mut rig, &mut persist).unwrap();
+    let dev = neofilter::calibration::fit::deviation_curve(&m, &persist.settings, None);
+    let (rms, _) = deviation_stats(&m.freqs, &dev, &m.coherence, &persist.settings);
+    println!(
+        "predicted {:.3} dB, measured after apply {rms:.3} dB",
+        plan.rms_pred_db
+    );
+    assert!((rms - plan.rms_pred_db).abs() < 0.15);
+}
+
 fn playback_bands() -> [BandParams; NUM_BANDS] {
     let mut p = [BandParams::default(); NUM_BANDS];
     p[0] = band(Shape::Bell, 3000.0, 2.0, 1.0);

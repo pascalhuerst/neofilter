@@ -15,6 +15,7 @@
 
 pub mod analysis;
 pub mod fit;
+pub mod offline;
 pub mod session;
 pub mod settings;
 pub mod sim;

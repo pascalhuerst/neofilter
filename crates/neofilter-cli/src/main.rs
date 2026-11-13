@@ -1,6 +1,7 @@
 //! NeoFilter command line tool: preset listing, response export, offline
 //! rendering and impulse-response comparison (calibration).
 
+mod calibrate;
 mod compare;
 mod ffp;
 mod model;
@@ -85,6 +86,12 @@ enum Command {
         #[arg(long, value_name = "FFP")]
         output: PathBuf,
     },
+    /// Fit calibration bands from a recording of the sent noise and of the
+    /// loop return (the plugin's loop calibration, offline).
+    ///
+    /// Prints delay, deviation statistics and the fitted bands; writes the
+    /// complete fitted preset (usable with "Paste preset").
+    Calibrate(calibrate::CalibrateArgs),
     /// Convert an `.ffp` EQ preset file into NeoFilter preset JSON (for "Paste preset").
     ImportFfp {
         #[arg(long, value_name = "FFP")]
@@ -250,6 +257,7 @@ fn run(cli: Cli) -> Result<String, String> {
                 );
             }
         }
+        Command::Calibrate(args) => out = calibrate::run(args)?,
         Command::ExportFfp {
             preset,
             template,
