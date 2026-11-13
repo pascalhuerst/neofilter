@@ -433,9 +433,13 @@ impl AnalogBand {
                 a: [p1 * p2, p1 + p2, 1.0],
             });
         }
-        let m = self.mag_sq(w0);
-        let k = 1.0 / m.sqrt();
-        self.sections[0].scale_gain(k);
+        // Normalise every section to 0 dB at the pivot, so that no section
+        // carries a large gain that later sections have to take back.
+        let n = self.len;
+        for s in &mut self.sections[..n] {
+            let k = 1.0 / s.mag_sq(w0).sqrt();
+            s.scale_gain(k);
+        }
     }
 
     /// Squared magnitude at angular frequency `w` (rad/s).
