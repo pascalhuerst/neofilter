@@ -48,6 +48,18 @@ struct Ramp {
     lin: f64,
 }
 
+/// f32 sample to f64, with NaN and infinities replaced by silence so that one
+/// bad host sample cannot spray non-finite values over the next 32 samples of
+/// every filter (or into whatever follows this plugin).
+#[inline]
+fn clean(s: f32) -> f64 {
+    if s.is_finite() {
+        f64::from(s)
+    } else {
+        0.0
+    }
+}
+
 fn db_to_lin(db: f64) -> f64 {
     if db == 0.0 {
         1.0
@@ -225,10 +237,10 @@ impl AudioPath {
             let n = (total - pos).min(max);
             let (l, r) = (&mut left[pos..pos + n], &mut right[pos..pos + n]);
             for (d, s) in self.left.iter_mut().zip(l.iter()) {
-                *d = f64::from(*s);
+                *d = clean(*s);
             }
             for (d, s) in self.right.iter_mut().zip(r.iter()) {
-                *d = f64::from(*s);
+                *d = clean(*s);
             }
             self.engine
                 .process_stereo(&mut self.left[..n], &mut self.right[..n]);
@@ -256,7 +268,7 @@ impl AudioPath {
             let n = (x.len() - pos).min(max);
             let chunk = &mut x[pos..pos + n];
             for (d, s) in self.left.iter_mut().zip(chunk.iter()) {
-                *d = f64::from(*s);
+                *d = clean(*s);
             }
             self.engine.process_mono(&mut self.left[..n]);
             if self.dry_only() {

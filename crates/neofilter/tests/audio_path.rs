@@ -232,3 +232,66 @@ fn no_nan_with_extreme_parameters() {
         assert!(l.iter().chain(&r).all(|v| v.is_finite()));
     }
 }
+
+#[test]
+fn restored_settings_are_in_effect_from_the_first_block() {
+    // A host restores the state, then initialises and processes: there must be
+    // no glide from defaults (bell gain, output gain, band fade-in).
+    let mut bands = FLAT;
+    bands[23] = BandParams {
+        used: true,
+        gain_db: 12.0,
+        ..BandParams::default()
+    };
+    let p = AudioParams {
+        bands: &bands,
+        gain_scale: 1.0,
+        out_gain_db: -6.0,
+        bypass: false,
+    };
+    for reset_instead in [false, true] {
+        let mut path = AudioPath::new(48000.0, 512);
+        if reset_instead {
+            path.reset();
+        } else {
+            path.prepare(44100.0, 256);
+            path.prepare(48000.0, 512);
+        }
+        let mut l: Vec<f32> = (0..512)
+            .map(|i| 0.1 * (2.0 * std::f64::consts::PI * 1000.0 * i as f64 / 48000.0).sin() as f32)
+            .collect();
+        let mut r = l.clone();
+        path.process_stereo(&mut l, &mut r, &p);
+        let peak = l[300..].iter().fold(0.0f32, |m, v| m.max(v.abs()));
+        // 12 dB bell gain (x3.98) and -6 dB output (x0.501): 0.1 -> 0.2
+        assert!(
+            (peak - 0.2).abs() < 0.01,
+            "reset {reset_instead}: peak {peak}"
+        );
+    }
+}
+
+#[test]
+fn non_finite_input_is_contained() {
+    let bands = preset("friend-eq-a");
+    let mut n = Noise(3);
+    let mut path = AudioPath::new(48000.0, 512);
+    let mut l: Vec<f32> = n.vec(4000).iter().map(|v| 0.1 * v).collect();
+    let mut r = l.clone();
+    l[1000] = f32::NAN;
+    r[1500] = f32::INFINITY;
+    r[1501] = f32::NEG_INFINITY;
+    path.process_stereo(&mut l, &mut r, &params(&bands));
+    assert!(
+        l.iter().all(|v| v.is_finite()),
+        "NaN reached the output (left)"
+    );
+    assert!(
+        r.iter().all(|v| v.is_finite()),
+        "inf reached the output (right)"
+    );
+    let mut m: Vec<f32> = n.vec(500).iter().map(|v| 0.1 * v).collect();
+    m[10] = f32::NAN;
+    path.process_mono(&mut m, &params(&bands));
+    assert!(m.iter().all(|v| v.is_finite()));
+}
