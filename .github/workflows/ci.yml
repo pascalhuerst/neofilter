@@ -27,7 +27,7 @@ jobs:
     name: rustfmt
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.99.1"
@@ -39,7 +39,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install Linux dependencies
         run: |
           sudo apt-get update
@@ -57,7 +57,7 @@ jobs:
     # The whole workspace takes a few minutes (calibration and RIAA design tests).
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install Linux dependencies
         run: |
           sudo apt-get update
@@ -82,7 +82,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         run: |
@@ -105,7 +105,7 @@ jobs:
           done
       - name: Upload bundles
         if: matrix.name == 'linux'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: neofilter-suite-linux-x86_64
           path: target/bundled/
