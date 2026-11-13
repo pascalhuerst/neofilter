@@ -12,6 +12,7 @@ pub mod biquad;
 pub mod conventions;
 pub mod engine;
 pub mod matched;
+pub mod refmatch;
 pub mod response;
 pub mod smoothing;
 pub mod types;
