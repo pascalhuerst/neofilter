@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 1279171dbf4677210d9a1f3161c3a5100c51a646245c1ddc2e700709d09a2639 # shrinks to (p, gs, fs) = (BandParams { used: true, enabled: true, shape: LowShelf, freq_hz: 918.9406477314985, gain_db: 8.412600949927702, q: 15.384601289877402, slope: Db30, placement: Stereo }, 1.107791406975448, 44100.0)
