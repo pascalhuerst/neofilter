@@ -1245,6 +1245,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "neo-measure"
+version = "0.1.0"
+dependencies = [
+ "approx",
+ "proptest",
+ "realfft",
+]
+
+[[package]]
 name = "neofilter"
 version = "0.1.0"
 dependencies = [
@@ -1283,17 +1292,20 @@ dependencies = [
 ]
 
 [[package]]
-name = "nih_log"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d0cdb52ef79af48ae110401c883bdb9c15e0306a99ab6ecf18bc52068b668e54"
+name = "neometer"
+version = "0.1.0"
 dependencies = [
- "atty",
- "log",
- "once_cell",
- "termcolor",
- "time",
- "windows",
+ "approx",
+ "assert_no_alloc",
+ "atomic_float 1.1.0",
+ "crossbeam",
+ "neo-measure",
+ "nih_plug",
+ "nih_plug_egui",
+ "realfft",
+ "serde",
+ "serde_json",
+ "triple_buffer",
 ]
 
 [[package]]
@@ -1307,6 +1319,20 @@ dependencies = [
  "nih_plug_egui",
  "proptest",
  "realfft",
+]
+
+[[package]]
+name = "nih_log"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d0cdb52ef79af48ae110401c883bdb9c15e0306a99ab6ecf18bc52068b668e54"
+dependencies = [
+ "atty",
+ "log",
+ "once_cell",
+ "termcolor",
+ "time",
+ "windows",
 ]
 
 [[package]]
