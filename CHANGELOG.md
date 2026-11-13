@@ -31,4 +31,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   up to 16 kHz at 44.1 kHz, but high-Q shelves/cuts, wide notches and
   96 dB/oct band passes near Nyquist deviate by several dB. The enforced
   tolerances are in `crates/neofilter-dsp/tests/accuracy.rs`.
+- While a parameter is automated, the design may switch between fit candidates
+  for single steps. In the useful range (Q 0.3 to 20, up to 8 kHz) this
+  changes the response by at most about 0.1 dB at one frequency. For a Notch
+  or Low Cut with Q below 0.3 and for anything beyond 0.4 x sample rate, such
+  single-step jumps of several dB occur above 15 kHz
+  (`crates/neofilter-dsp/tests/continuity.rs`).
+- Sweeping the frequency of a very steep cut (96 dB/oct) across a signal
+  rings like any fast-swept high-order filter; this is not a click but can be
+  loud with high Q.
+- "Paste preset" needs the editor window to receive the Ctrl+V key press;
+  hosts that keep the keyboard focus for themselves will not deliver it.
 - Not yet verified in a real host or against measurements of the reference EQ.

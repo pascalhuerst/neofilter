@@ -118,3 +118,43 @@ fn bell_automation_has_no_clicks() {
         }
     }
 }
+
+#[test]
+fn stereo_placements_have_no_clicks_during_automation() {
+    use neofilter_dsp::Placement;
+    let fs = 48000.0;
+    for placement in [
+        Placement::Left,
+        Placement::Right,
+        Placement::Mid,
+        Placement::Side,
+    ] {
+        for shape in [Shape::Bell, Shape::LowShelf, Shape::HighCut] {
+            let n = (0.8 * fs) as usize;
+            let mut l = sine(n, 100.0, fs, 0.4);
+            let mut r = sine(n, 100.0, fs, 0.2);
+            let mut e = EqEngine::new(fs);
+            let mut base = band(shape, 300.0, 9.0, 3.0, Slope::Db24);
+            base.placement = placement;
+            e.set_band(0, &base);
+            let mut pos = 0;
+            while pos < n {
+                let m = 64.min(n - pos);
+                let t = (pos as f64 / (0.5 * fs)).min(1.0);
+                let mut p = base;
+                p.freq_hz = 30.0 * 100f64.powf(t);
+                p.gain_db = 9.0 - 18.0 * t;
+                e.set_band(0, &p);
+                e.process_stereo(&mut l[pos..pos + m], &mut r[pos..pos + m]);
+                pos += m;
+            }
+            for (name, y) in [("left", &l), ("right", &r)] {
+                let (ratio, at) = click_ratio(y, 100.0, fs, 2000);
+                assert!(
+                    ratio < 6.0,
+                    "{placement:?} {shape:?} {name}: click ratio {ratio} at {at}"
+                );
+            }
+        }
+    }
+}
