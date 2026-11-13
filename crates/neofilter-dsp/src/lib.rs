@@ -7,6 +7,7 @@
 #![allow(clippy::neg_cmp_op_on_partial_ord)]
 
 pub mod analog;
+pub mod autofit;
 pub mod band;
 pub mod biquad;
 pub mod conventions;
