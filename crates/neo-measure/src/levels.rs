@@ -281,6 +281,14 @@ impl TruePeakMeter {
     pub fn reset_max(&mut self) {
         self.hold.reset_max();
     }
+    /// Clear the held value and the maximum but keep the interpolator history,
+    /// so a reset in the middle of a signal does not make a zero-to-signal step
+    /// (which rings and over-reads by up to ~0.06 dB). Use this for a meter
+    /// "reset" button; [`TruePeakMeter::reset`] is for starting a new signal.
+    pub fn reset_hold(&mut self) {
+        self.hold.reset();
+        self.block = 0.0;
+    }
     pub fn reset(&mut self) {
         self.hold.reset();
         self.ring.iter_mut().for_each(|v| *v = 0.0);
@@ -498,6 +506,36 @@ impl BlockStats {
 mod tests {
     use super::*;
     use std::f64::consts::{FRAC_PI_2, FRAC_PI_4};
+
+    #[test]
+    fn reset_hold_mid_signal_does_not_overshoot() {
+        // 1 kHz at -18 dBFS, 44.1 kHz. A full reset() zeroes the interpolator
+        // history; the zero-to-signal step rings and over-reads by up to
+        // ~0.06 dB depending on the phase at the reset. reset_hold() keeps the
+        // history and never over-reads.
+        let fs = 44_100.0;
+        let x: Vec<f64> = (0..44_100)
+            .map(|i| 0.125_892_5 * (2.0 * PI * 1000.0 * i as f64 / fs).sin())
+            .collect();
+        let (mut worst_full, mut worst_hold) = (-200.0f64, -200.0f64);
+        for split in (22_000..22_044).step_by(2) {
+            let mut full = TruePeakMeter::new(fs);
+            let mut hold = TruePeakMeter::new(fs);
+            full.process(&x[..split]);
+            hold.process(&x[..split]);
+            full.reset();
+            hold.reset_hold();
+            full.process(&x[split..]);
+            hold.process(&x[split..]);
+            worst_full = worst_full.max(full.true_peak_db());
+            worst_hold = worst_hold.max(hold.true_peak_db());
+        }
+        assert!(worst_hold < -18.0 + 0.01, "{worst_hold}");
+        assert!(
+            worst_full > worst_hold + 0.02,
+            "{worst_full} vs {worst_hold}"
+        );
+    }
 
     /// Raised-cosine fade in/out (an abrupt onset would itself overshoot by
     /// the Gibbs phenomenon and legitimately read higher).
