@@ -1,1 +1,1 @@
-//! NeoRIAA plugin. See `docs/PLAN-vinyl-suite.md`.
+pub mod dsp;
