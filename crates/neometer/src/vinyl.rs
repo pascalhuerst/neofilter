@@ -317,7 +317,7 @@ mod tests {
     #[test]
     fn calibration_formulas() {
         assert!((velocity_cm_s(-18.0, -18.0) - 5.0).abs() < 1e-12);
-        assert!((velocity_cm_s(-12.0, -18.0) - 10.0).abs() < 0.02);
+        assert!((velocity_cm_s(-12.0, -18.0) - 9.976).abs() < 0.001);
         assert_eq!(velocity_cm_s(-400.0, -18.0), 0.0);
         // v = 5 cm/s at 1 kHz -> d = v / (2 pi f) = 5/(6283) cm = 7.96 um
         let d = 1.0 / (2.0 * PI * 1000.0); // integral peak of a unit sine
