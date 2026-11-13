@@ -37,6 +37,7 @@ jobs:
   clippy:
     name: clippy
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Install Linux dependencies
@@ -53,6 +54,8 @@ jobs:
   test:
     name: test
     runs-on: ubuntu-latest
+    # The whole workspace takes a few minutes (calibration and RIAA design tests).
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - name: Install Linux dependencies
@@ -73,10 +76,11 @@ jobs:
       matrix:
         include:
           - { name: linux, os: ubuntu-latest }
-          # Build-only checks that the plugin still compiles and bundles elsewhere.
+          # Build-only checks that the plugins still compile and bundle elsewhere.
           - { name: macos, os: macos-latest }
           - { name: windows, os: windows-latest }
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - name: Install Linux dependencies
@@ -88,11 +92,21 @@ jobs:
         with:
           toolchain: "1.99.1"
       - uses: Swatinem/rust-cache@v2
-      - run: cargo xtask bundle neofilter --release
-      - name: Upload bundle
+      # One -p per plugin: nih_plug_xtask does not accept several bare names.
+      - name: Bundle NeoFilter, NeoRIAA and NeoMeter
+        run: cargo xtask bundle -p neofilter -p neoriaa -p neometer --release
+      - name: Check that all bundles exist
+        shell: bash
+        run: |
+          set -euo pipefail
+          for p in neofilter neoriaa neometer; do
+            test -e "target/bundled/$p.clap"
+            test -e "target/bundled/$p.vst3"
+          done
+      - name: Upload bundles
         if: matrix.name == 'linux'
         uses: actions/upload-artifact@v4
         with:
-          name: neofilter-linux-x86_64
+          name: neofilter-suite-linux-x86_64
           path: target/bundled/
           if-no-files-found: error
