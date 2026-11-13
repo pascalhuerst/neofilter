@@ -49,6 +49,24 @@ fn list_shows_factory_presets() {
     assert!(o.status.success());
     let s = stdout(&o);
     assert!(s.contains("friend-eq-a") && s.contains("friend-eq-b") && s.contains("default"));
+    assert!(s.contains("friend-eq-ab") && s.contains("Friend EQ A+B (series)"));
+}
+
+#[test]
+fn curve_of_the_combined_preset_is_the_sum_of_a_and_b() {
+    let col = |preset: &str| -> Vec<f64> {
+        let o = cli(&["curve", "--preset", preset, "--points", "100"]);
+        assert!(o.status.success(), "{}", stderr(&o));
+        stdout(&o)
+            .lines()
+            .filter_map(|l| l.split(',').nth(1)?.parse().ok())
+            .collect()
+    };
+    let (a, b, ab) = (col("friend-eq-a"), col("friend-eq-b"), col("friend-eq-ab"));
+    assert!(ab.len() >= 100 && ab.len() == a.len() && ab.len() == b.len());
+    for i in 0..ab.len() {
+        assert!((ab[i] - (a[i] + b[i])).abs() < 0.01, "point {i}");
+    }
 }
 
 #[test]
