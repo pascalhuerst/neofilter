@@ -25,7 +25,7 @@ pub mod filter;
 pub mod generator;
 //pub mod levels;
 //pub mod loudness;
-//pub mod spectrum;
+pub mod spectrum;
 //pub mod stereo;
 //pub mod tone;
 //pub mod transfer;
