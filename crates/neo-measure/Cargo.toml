@@ -1,0 +1,13 @@
+[package]
+name = "neo-measure"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Audio metering and measurement DSP (levels, loudness, spectra, transfer functions)"
+
+[dependencies]
+realfft = "3"
+
+[dev-dependencies]
+approx = "0.5"
+proptest = "1"

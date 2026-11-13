@@ -1,0 +1,22 @@
+[package]
+name = "neometer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "NeoMeter: metering and measurement plugin for mastering and vinyl cutting (CLAP + VST3)"
+
+[lib]
+name = "neometer"
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", rev = "de421011f41a6d10fc8c7a6084e4f4dee0143683", features = ["assert_process_allocs"] }
+nih_plug_egui = { git = "https://github.com/robbert-vdh/nih-plug.git", rev = "de421011f41a6d10fc8c7a6084e4f4dee0143683" }
+neo-measure = { path = "../neo-measure" }
+neoriaa = { path = "../neoriaa" }
+atomic_float = "1"
+crossbeam = "0.8"
+realfft = "3"
+
+[dev-dependencies]
+approx = "0.5"

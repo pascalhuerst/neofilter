@@ -4,6 +4,9 @@ members = [
     "crates/neofilter-dsp",
     "crates/neofilter",
     "crates/neofilter-cli",
+    "crates/neo-measure",
+    "crates/neoriaa",
+    "crates/neometer",
     "xtask",
 ]
 
