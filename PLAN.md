@@ -157,10 +157,10 @@ for band frequencies ≤ 16 kHz (document any setting that cannot meet this).
 
 ## Plugin layer
 
-- Params: `#[nested(array, group = "Band N")]` band params with stable ids
-  `b{n}_used`, `b{n}_on`, `b{n}_shape`, `b{n}_freq`, `b{n}_gain`, `b{n}_q`,
-  `b{n}_slope`, `b{n}_place` (n = 1..24) + `out_gain`, `gain_scale`,
-  `bypass`. Ids are frozen once released.
+- Params: `#[nested(array, group = "Band")]` band params; nih-plug generates
+  ids `{field}_{n}` (n = 1..24) in group `Band {n}`: `used_n`, `on_n`,
+  `shape_n`, `freq_n`, `gain_n`, `q_n`, `slope_n`, `place_n`; plus globals
+  `out_gain` (dB), `gain_scale` (percent), `bypass`. Ids are frozen once released.
 - Freq: skewed (log) range, Hz/kHz formatting; gain dB; Q 2 decimals.
 - Audio layouts: stereo→stereo, mono→mono. `f32` buffers converted to f64
   internally. Sample-accurate automation enabled.
