@@ -20,7 +20,7 @@
 //! | [`delay`], [`transfer`], [`tone`], [`wow_flutter`] | - | all |
 //! | [`weighting`] | filters | noise-level helper |
 
-//pub mod delay;
+pub mod delay;
 pub mod filter;
 pub mod generator;
 //pub mod levels;
